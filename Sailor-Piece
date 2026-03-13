@@ -23,7 +23,7 @@ local Islands={
 local Bosses={
     {Name="SukunaBoss",Display="Sukuna",Island="Shibuya"},
     {Name="YujiBoss",Display="Yuji",Island="Shibuya"},
-    {Name="GojoBoss",Display="Gojo",Island="Shibuya"},
+    {Name="GojoBoss",Display="Gojo",Island="Shibuya",RenderNear="YujiBoss"},
     {Name="AizenBoss",Display="Aizen",Island="HuecoMundo"},
     {Name="AlucardBoss",Display="Alucard",Island="Sailor"},
     {Name="JinwooBoss",Display="Jinwoo",Island="Sailor"},
@@ -35,6 +35,8 @@ local AllBossNames={}
 for _,b in ipairs(Bosses) do AllBossNames[b.Name]=true end
 local BossDisplay={}
 for _,b in ipairs(Bosses) do BossDisplay[b.Name]=b.Display end
+local BossRenderNear={}
+for _,b in ipairs(Bosses) do if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
 local IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 local ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
 local ANOS_ISLAND="Academy"
@@ -164,7 +166,7 @@ local function OpenAllChests()
     if not F.AutoChest then return end
     if tick()-LastChest<3 then return end
     LastChest=tick()
-    local useItem=nil
+    local useItem
     pcall(function() useItem=RS:WaitForChild("Remotes",2):WaitForChild("UseItem",2) end)
     if not useItem then return end
     for _,name in ipairs(ChestNames) do
@@ -220,6 +222,17 @@ local function FindAnyAnosAlive() local nf=workspace:FindFirstChild("NPCs") if n
 local function CheckBoss(name)
     local m=FreshBoss(name) if m then return m end
     if IsAnosModel(name) then return FindAnyAnosAlive() end
+    return nil
+end
+local function GetRenderPos(name)
+    local ref=BossRenderNear[name]
+    if not ref then return nil end
+    local nf=workspace:FindFirstChild("NPCs") if not nf then return nil end
+    for _,m in ipairs(nf:GetChildren()) do
+        if m:IsA("Model") and m.Name==ref then
+            local p=ModelPos(m) if p then return p end
+        end
+    end
     return nil
 end
 local function AllBossesOnIsland(island)
@@ -428,7 +441,7 @@ end
 if LP.Character then task.spawn(function() OnCharAdded(LP.Character) end) end
 Conn(LP.CharacterAdded:Connect(OnCharAdded))
 local function GetIslandNames() local n={"Auto"} for _,i in ipairs(Islands) do table.insert(n,i.Portal) end return n end
-Conn(RunService.Stepped:Connect(function(_,dt)
+Conn(RunService.Stepped:Connect(function()
     if not F.AutoFarmLevel then return end
     if TweenOn then return end
     local c=LP.Character if not c then return end
@@ -443,12 +456,7 @@ Conn(RunService.Stepped:Connect(function(_,dt)
     end
     if LockTarget then
         local goal,look=GetGoalForEnemy(LockTarget)
-        if goal then
-            local goalCF=CFrame.new(goal,look or goal)
-            LockA=math.min(LockA+dt*4,1)
-            hrp.CFrame=goalCF
-            HoverPos=goal
-        end
+        if goal then hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal end
     elseif HoverPos then
         hrp.CFrame=CFrame.new(HoverPos,HoverPos+Vector3.new(0,-1,0))
     end
@@ -537,20 +545,29 @@ local function DoBossTick()
         ForceTP(bi)
         task.wait(1.5)
         BossCurrentIsland=bi
-        local hrp=PlayerHRP()
-        if hrp then TweenToPoint(hrp.Position+Vector3.new(150,F.HeightOffset,150)) task.wait(0.3) end
-        for _=1,8 do
+        local renderPos=GetRenderPos(BossTargetName)
+        if renderPos then
+            local hrp=PlayerHRP()
+            if hrp then hrp.CFrame=CFrame.new(renderPos.X,renderPos.Y+F.HeightOffset,renderPos.Z) end
+        else
+            local hrp=PlayerHRP()
+            if hrp then TweenToPoint(hrp.Position+Vector3.new(150,F.HeightOffset,150)) task.wait(0.3) end
+        end
+        for _=1,10 do
             local m=CheckBoss(BossTargetName)
             if m and ModelPos(m) then BossTPDone=true return end
             task.wait(0.3)
         end
         local m2=CheckBoss(BossTargetName)
         if m2 and ModelPos(m2) then BossTPDone=true return end
-        if hrp then TweenToPoint(hrp.Position+Vector3.new(-300,F.HeightOffset,-300)) task.wait(0.3) end
-        for _=1,6 do
-            local m=CheckBoss(BossTargetName)
-            if m and ModelPos(m) then BossTPDone=true return end
-            task.wait(0.3)
+        if not renderPos then
+            local hrp=PlayerHRP()
+            if hrp then TweenToPoint(hrp.Position+Vector3.new(-300,F.HeightOffset,-300)) task.wait(0.3) end
+            for _=1,6 do
+                local m=CheckBoss(BossTargetName)
+                if m and ModelPos(m) then BossTPDone=true return end
+                task.wait(0.3)
+            end
         end
         local m3=CheckBoss(BossTargetName)
         if not m3 then
@@ -578,12 +595,8 @@ local function DoBossTick()
         if nextName then
             BossTargetName=nextName
             local nextIsland=GetBossIsland(nextName)
-            if nextIsland==BossCurrentIsland then
-                BossTPDone=true
-            else
-                BossTPDone=false LastBossTP=0
-                BossCurrentIsland=nextIsland
-            end
+            if nextIsland==BossCurrentIsland then BossTPDone=true
+            else BossTPDone=false LastBossTP=0 BossCurrentIsland=nextIsland end
             Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(nextIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(deadName) end
         return
@@ -661,7 +674,7 @@ UISec:AddColorPicker({Name="Background Color",Default=Hub.Colors.BGDBColor,Callb
 UISec:AddColorPicker({Name="Stroke Color",Default=Hub.Colors.StrokeColor,Callback=function(v) Hub.Colors.StrokeColor=v Hub:RefreshCurrentColor() end})
 UISec:AddButton({Name="Copy Discord",Callback=function() pcall(function() setclipboard(DISCORD) end) Notify.new({Title="Copied",Content="Discord link copied!",Duration=2,Icon=ICON}) end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
-InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Kills all on same island before leaving\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
+InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Kills all on same island first\nGojo: renders via Yuji's position\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
 local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
 ThSec:AddDropdown({Name="Select Theme",Default="Default",Values={"Default","Dark Green","Dark Blue","Purple Rose","Skeet"},Callback=function(v) Hub:SetTheme(v) end})
 local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
