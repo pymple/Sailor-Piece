@@ -38,7 +38,7 @@ for _,b in ipairs(Bosses) do BossDisplay[b.Name]=b.Display end
 local IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 local ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
 local ANOS_ISLAND="Academy"
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
 local Kills,BossKills=0,0
@@ -64,6 +64,7 @@ local BossInfoP=nil
 local BossTimerCache={}
 local BossTPDone=false
 local LastBossTP=0
+local BossCurrentIsland=nil
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
@@ -93,6 +94,12 @@ local function ModelPos(e)
     if e:IsA("Model") then local ok2,bb=pcall(function() return e:GetBoundingBox() end) if ok2 and bb then return bb.Position end end
     return nil
 end
+local function ModelCF(e)
+    if not e then return nil end
+    local r=Root(e) if r then return r.CFrame end
+    local ok,cf=pcall(function() return e:GetPivot() end) if ok and cf then return cf end
+    return nil
+end
 local function PlayerHRP() local c=LP.Character return c and c:FindFirstChild("HumanoidRootPart") end
 local function DistTo(pos) if not pos then return 99999 end local hrp=PlayerHRP() if not hrp then return 99999 end return(hrp.Position-pos).Magnitude end
 local function IsAnosModel(name) return name and name:find("AnosBoss")~=nil end
@@ -113,18 +120,18 @@ local function IslandForLevel(lvl) for _,i in ipairs(Islands) do if lvl<i.FarmUn
 local function IslandByName(n) for _,i in ipairs(Islands) do if i.Portal==n then return i end end return nil end
 local function GetFarmIsland() local lvl=GetLevel() if lvl==0 then return nil end if F.SelectedIsland=="Auto" then return IslandForLevel(lvl) end return IslandByName(F.SelectedIsland) or IslandForLevel(lvl) end
 local function IsAlive() local c=LP.Character if not c then return false end local h=c:FindFirstChild("HumanoidRootPart") local hm=c:FindFirstChildOfClass("Humanoid") return h~=nil and hm~=nil and hm.Health>0 end
-local function WaitChar() if IsAlive() then return true end local t=tick() while tick()-t<20 do if IsAlive() then task.wait(1.5) return true end task.wait(0.25) end return false end
+local function WaitChar() if IsAlive() then return true end local t=tick() while tick()-t<20 do if IsAlive() then task.wait(0.5) return true end task.wait(0.15) end return false end
 local function IsPlayer(m) for _,p in ipairs(Players:GetPlayers()) do if p.Character==m then return true end end return false end
 local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end return false end
 local function MatchEnemy(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do if lo:find(e:lower(),1,true) then return true end end return false end
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
-    QState="NONE" LastQuestAccept=0 QCompDet=false BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0
+    QState="NONE" LastQuestAccept=0 QCompDet=false BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
 end
 local function DoTP(portal)
-    if tick()-LastTP<4 then return false end
+    if tick()-LastTP<3 then return false end
     if tick()-TPReset>120 then TPCount=0 TPReset=tick() end
-    if TPCount>=8 then return false end
+    if TPCount>=10 then return false end
     LastTP=tick() TPCount=TPCount+1
     local ok=false
     pcall(function() RS:WaitForChild("Remotes",3):WaitForChild("TeleportToPortal",3):FireServer(portal) ok=true end)
@@ -140,18 +147,34 @@ end
 local function QuestAccept(island) if not island then return end pcall(function() RS:WaitForChild("RemoteEvents",3):WaitForChild("QuestAccept",3):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" QCompDet=false end
 local function QuestAbandon() pcall(function() RS:WaitForChild("RemoteEvents",3):WaitForChild("QuestAbandon",3):FireServer("repeatable") end) pcall(function() RS:WaitForChild("RemoteEvents",2):WaitForChild("QuestAbandon",2):FireServer() end) QState="NONE" QCompDet=false end
 local function QuestScanComplete() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("quest completed") or t:find("quest complete") then return true end end end return false end
+local function ClickYes()
+    local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+    for _,desc in ipairs(pg:GetDescendants()) do
+        if desc:IsA("TextButton") or desc:IsA("ImageButton") then
+            local txt="" pcall(function() txt=(desc.Text or ""):lower() end)
+            local nm=(desc.Name or ""):lower()
+            if txt=="yes" or nm=="yes" or nm=="confirm" or txt=="confirm" then
+                pcall(function() for _,conn in ipairs(getconnections(desc.Activated)) do conn:Fire() end end)
+                pcall(function() for _,conn in ipairs(getconnections(desc.MouseButton1Click)) do conn:Fire() end end)
+            end
+        end
+    end
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
     if tick()-LastChest<3 then return end
     LastChest=tick()
+    local useItem=nil
+    pcall(function() useItem=RS:WaitForChild("Remotes",2):WaitForChild("UseItem",2) end)
+    if not useItem then return end
     for _,name in ipairs(ChestNames) do
-        pcall(function() RS:WaitForChild("Remotes",2):WaitForChild("UseItem",2):FireServer("Use",name,999,false) end)
-        pcall(function() RS:WaitForChild("Remotes",2):WaitForChild("UseItem",2):FireServer(name,999) end)
-        pcall(function() RS:WaitForChild("Remotes",2):WaitForChild("UseItem",2):FireServer(name) end)
-        task.wait(0.15)
+        pcall(function() useItem:FireServer("Use",name,1,false) end)
+        task.wait(0.3)
+        ClickYes()
+        task.wait(0.3)
+        ClickYes()
+        task.wait(0.2)
     end
-    local pg=LP:FindFirstChild("PlayerGui")
-    if pg then for _,desc in ipairs(pg:GetDescendants()) do if desc:IsA("TextButton") or desc:IsA("ImageButton") then local txt="" pcall(function() txt=(desc.Text or ""):lower() end) local nm=(desc.Name or ""):lower() if txt=="yes" or nm=="yes" or nm=="confirm" or txt=="confirm" then pcall(function() for _,conn in ipairs(getconnections(desc.Activated)) do conn:Fire() end end) pcall(function() for _,conn in ipairs(getconnections(desc.MouseButton1Click)) do conn:Fire() end end) end end end end
 end
 local function SpawnCrystal(island)
     if not island or not F.AutoSpawn then return end
@@ -165,7 +188,7 @@ local function SpawnCrystal(island)
                 local hrp=PlayerHRP()
                 local cp
                 if desc:IsA("BasePart") then cp=desc.Position elseif desc:IsA("Model") then local pm=desc.PrimaryPart or desc:FindFirstChildWhichIsA("BasePart") if pm then cp=pm.Position end end
-                if hrp and cp then if(hrp.Position-cp).Magnitude>15 then hrp.CFrame=CFrame.new(cp+Vector3.new(0,3,3)) task.wait(0.3) end pcall(function() fireproximityprompt(pr) end) task.wait(0.3) pcall(function() fireproximityprompt(pr) end) end
+                if hrp and cp then if(hrp.Position-cp).Magnitude>15 then hrp.CFrame=CFrame.new(cp+Vector3.new(0,3,3)) task.wait(0.2) end pcall(function() fireproximityprompt(pr) end) task.wait(0.2) pcall(function() fireproximityprompt(pr) end) end
                 return
             end
         end
@@ -199,8 +222,34 @@ local function CheckBoss(name)
     if IsAnosModel(name) then return FindAnyAnosAlive() end
     return nil
 end
+local function AllBossesOnIsland(island)
+    local nf=workspace:FindFirstChild("NPCs") if not nf then return {} end
+    local out={}
+    for _,m in ipairs(nf:GetChildren()) do
+        if m:IsA("Model") then
+            local hm=GetHum(m)
+            if hm and hm.Health>0 then
+                if AllBossNames[m.Name] and BF[m.Name] and BossIsland[m.Name]==island then table.insert(out,m.Name)
+                elseif IsAnosModel(m.Name) and F.AnosEnabled and island==ANOS_ISLAND then table.insert(out,m.Name) end
+            end
+        end
+    end
+    return out
+end
 local function PickNextBossName()
     local nf=workspace:FindFirstChild("NPCs") if not nf then return nil end
+    if BossCurrentIsland then
+        local sameIsland=AllBossesOnIsland(BossCurrentIsland)
+        if #sameIsland>0 then
+            local hrp=PlayerHRP()
+            if hrp and #sameIsland>1 then
+                local cl,cd=nil,math.huge
+                for _,bn in ipairs(sameIsland) do local bp=ModelPos(CheckBoss(bn)) if bp then local d=(hrp.Position-bp).Magnitude if d<cd then cd=d cl=bn end elseif not cl then cl=bn end end
+                if cl then return cl end
+            end
+            return sameIsland[1]
+        end
+    end
     local alive={}
     for _,m in ipairs(nf:GetChildren()) do
         if m:IsA("Model") then
@@ -213,11 +262,23 @@ local function PickNextBossName()
     end
     if #alive==0 then return nil end
     if #alive==1 then return alive[1] end
-    local hrp=PlayerHRP()
-    if hrp then
-        local cl,cd=nil,math.huge
-        for _,bn in ipairs(alive) do local bp=ModelPos(FreshBoss(bn)) if bp then local d=(hrp.Position-bp).Magnitude if d<cd then cd=d cl=bn end elseif not cl then cl=bn end end
-        if cl then return cl end
+    local byIsland={}
+    for _,bn in ipairs(alive) do
+        local bi=GetBossIsland(bn) or "?"
+        if not byIsland[bi] then byIsland[bi]={} end
+        table.insert(byIsland[bi],bn)
+    end
+    local bestIsland,bestCount=nil,0
+    for isl,list in pairs(byIsland) do if #list>bestCount then bestCount=#list bestIsland=isl end end
+    if bestIsland and byIsland[bestIsland] then
+        local pick=byIsland[bestIsland]
+        local hrp=PlayerHRP()
+        if hrp and #pick>1 then
+            local cl,cd=nil,math.huge
+            for _,bn in ipairs(pick) do local bp=ModelPos(CheckBoss(bn)) if bp then local d=(hrp.Position-bp).Magnitude if d<cd then cd=d cl=bn end elseif not cl then cl=bn end end
+            if cl then return cl end
+        end
+        return pick[1]
     end
     return alive[1]
 end
@@ -272,28 +333,64 @@ local function GetTool() local c=LP.Character if not c then return nil end for _
 local function EquipSword()
     local eq=GetTool()
     if eq and eq.Name:lower()~="combat" then return end
-    if eq and eq.Name:lower()=="combat" then local hm=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") if hm then hm:UnequipTools() end task.wait(0.2) end
+    if eq and eq.Name:lower()=="combat" then local hm=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") if hm then hm:UnequipTools() end task.wait(0.15) end
     local bp=LP:FindFirstChild("Backpack") if not bp then return end
     local hm=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") if not hm then return end
     for _,c in ipairs(bp:GetChildren()) do if c:IsA("Tool") and c.Name:lower()~="combat" then hm:EquipTool(c) return end end
 end
+local function GetGoalForEnemy(enemy)
+    local pos=ModelPos(enemy) if not pos then return nil,nil end
+    if F.FarmMode=="Behind" then
+        local ecf=ModelCF(enemy)
+        if ecf then
+            local behind=ecf.Position-ecf.LookVector*F.BehindDist
+            return Vector3.new(behind.X,behind.Y+1,behind.Z),ecf.Position
+        end
+        return Vector3.new(pos.X,pos.Y+1,pos.Z),pos
+    end
+    return Vector3.new(pos.X,pos.Y+F.HeightOffset,pos.Z),pos
+end
 local function TweenTo(enemy)
     if not enemy then return end
-    local pos=ModelPos(enemy) if not pos then return end
+    local goal,look=GetGoalForEnemy(enemy) if not goal then return end
     local hrp=PlayerHRP() if not hrp then return end
+    if F.MoveMode=="Teleport" then
+        StopTw()
+        hrp.CFrame=CFrame.new(goal,look or goal)
+        LockTarget=enemy TweenOn=false TweenTarget=nil HoverPos=goal
+        return
+    end
     if TweenTarget~=enemy then StopTw() end
-    local ap=Vector3.new(pos.X,pos.Y+F.HeightOffset,pos.Z)
-    local d=(hrp.Position-ap).Magnitude
-    if d<5 then LockTarget=enemy TweenOn=false TweenTarget=nil HoverPos=ap return end
+    local d=(hrp.Position-goal).Magnitude
+    if d<5 then LockTarget=enemy TweenOn=false TweenTarget=nil HoverPos=goal return end
     if TweenOn and TweenTarget==enemy then return end
     StopTw() TweenOn=true TweenTarget=enemy LockTarget=nil LockA=0
-    local cf=CFrame.new(ap,pos)
+    local cf=CFrame.new(goal,look or goal)
     local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
     ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
-    ATween.Completed:Connect(function() ATween=nil TweenOn=false TweenTarget=nil LockTarget=enemy HoverPos=ap end)
+    ATween.Completed:Connect(function() ATween=nil TweenOn=false TweenTarget=nil LockTarget=enemy HoverPos=goal end)
     ATween:Play()
     local t=tick()
     while TweenOn and TweenTarget==enemy and tick()-t<dur+0.5 do task.wait(0.05) end
+end
+local function TweenToPoint(goal)
+    local hrp=PlayerHRP() if not hrp then return end
+    if F.MoveMode=="Teleport" then
+        StopTw()
+        hrp.CFrame=CFrame.new(goal,goal+Vector3.new(0,-1,0))
+        HoverPos=goal
+        return
+    end
+    local d=(hrp.Position-goal).Magnitude
+    if d<5 then return end
+    StopTw() TweenOn=true LockTarget=nil LockA=0
+    local cf=CFrame.new(goal,goal+Vector3.new(0,-1,0))
+    local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
+    ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
+    ATween.Completed:Connect(function() ATween=nil TweenOn=false HoverPos=goal end)
+    ATween:Play()
+    local t=tick()
+    while TweenOn and tick()-t<dur+0.5 do task.wait(0.05) end
 end
 local function FireAbilities()
     if tick()-LastSkill<F.SkillCooldown then return end
@@ -326,7 +423,7 @@ local function SetupAntiAFK()
 end
 local function OnCharAdded(char)
     char:WaitForChild("Humanoid",10) LockTarget=nil TweenOn=false TweenTarget=nil LockA=0 HoverPos=nil
-    if F.AutoEquip then task.spawn(function() task.wait(1) for _=1,15 do task.wait(0.4) local eq=GetTool() if eq and eq.Name:lower()~="combat" then break end EquipSword() end end) end
+    if F.AutoEquip then task.spawn(function() task.wait(0.5) for _=1,10 do task.wait(0.3) local eq=GetTool() if eq and eq.Name:lower()~="combat" then break end EquipSword() end end) end
 end
 if LP.Character then task.spawn(function() OnCharAdded(LP.Character) end) end
 Conn(LP.CharacterAdded:Connect(OnCharAdded))
@@ -336,28 +433,39 @@ Conn(RunService.Stepped:Connect(function(_,dt)
     if TweenOn then return end
     local c=LP.Character if not c then return end
     local hrp=c:FindFirstChild("HumanoidRootPart") if not hrp then return end
-    for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
-    if LockTarget then
-        local hm=GetHum(LockTarget)
-        if not hm or hm.Health<=0 or not LockTarget.Parent then HoverPos=hrp.Position LockTarget=nil LockA=0
-        elseif not BossFight and CurIsland then if not MatchEnemy(LockTarget.Name,CurIsland) and not IsBoss(LockTarget.Name) then HoverPos=hrp.Position LockTarget=nil LockA=0 end end
+    if F.FarmMode=="Plank" then
+        for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
     end
     if LockTarget then
-        local pos=ModelPos(LockTarget)
-        if pos then local goalPos=Vector3.new(pos.X,pos.Y+F.HeightOffset,pos.Z) local goalCF=CFrame.new(goalPos,pos) LockA=math.min(LockA+dt*3,1) hrp.CFrame=hrp.CFrame:Lerp(goalCF,LockA*0.85) HoverPos=goalPos end
-    elseif HoverPos then hrp.CFrame=hrp.CFrame:Lerp(CFrame.new(HoverPos,HoverPos+Vector3.new(0,-1,0)),0.5) end
-    hrp.Velocity=Vector3.zero
-    pcall(function() hrp.AssemblyLinearVelocity=Vector3.zero end)
-    pcall(function() hrp.AssemblyAngularVelocity=Vector3.zero end)
+        local hm=GetHum(LockTarget)
+        if not hm or hm.Health<=0 or not LockTarget.Parent then LockTarget=nil LockA=0
+        elseif not BossFight and CurIsland then if not MatchEnemy(LockTarget.Name,CurIsland) and not IsBoss(LockTarget.Name) then LockTarget=nil LockA=0 end end
+    end
+    if LockTarget then
+        local goal,look=GetGoalForEnemy(LockTarget)
+        if goal then
+            local goalCF=CFrame.new(goal,look or goal)
+            LockA=math.min(LockA+dt*4,1)
+            hrp.CFrame=goalCF
+            HoverPos=goal
+        end
+    elseif HoverPos then
+        hrp.CFrame=CFrame.new(HoverPos,HoverPos+Vector3.new(0,-1,0))
+    end
+    if F.FarmMode=="Plank" then
+        hrp.Velocity=Vector3.zero
+        pcall(function() hrp.AssemblyLinearVelocity=Vector3.zero end)
+        pcall(function() hrp.AssemblyAngularVelocity=Vector3.zero end)
+    end
 end))
 local function ExitBossMode(lastBossName)
     local bi=lastBossName and GetBossIsland(lastBossName)
-    BossFight=false BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil LastBossTP=0
+    BossFight=false BossTargetName=nil BossTPDone=false BossCurrentIsland=nil ClearTgt() HoverPos=nil LastBossTP=0
     QState="NONE" LastQuestAccept=0 QCompDet=false LastEnemy=0
     local farmIsland=GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         CurIsland=farmIsland IslandTPd=true SpawnDone=true LastEnemy=tick()
-        if F.AutoQuest then task.delay(0.3,function() QuestAccept(CurIsland) end) end
+        if F.AutoQuest then task.delay(0.15,function() QuestAccept(CurIsland) end) end
         Notify.new({Title="Bosses Clear!",Content="Already on "..bi..", resuming farm",Duration=3,Icon=ICON})
     else
         CurIsland=nil IslandTPd=false SpawnDone=false
@@ -367,23 +475,23 @@ end
 local function DoFarmTick()
     local tgtIsland=GetFarmIsland() if not tgtIsland then return end
     if not CurIsland or CurIsland.Portal~=tgtIsland.Portal then
-        if CurIsland then StopTw() QuestAbandon() task.wait(0.3) end
+        if CurIsland then StopTw() QuestAbandon() task.wait(0.15) end
         CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil LockA=0 HoverPos=nil LastEnemy=0 LastQuestAccept=0 QCompDet=false
         Notify.new({Title="-> "..tgtIsland.Portal,Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
     end
     if not IslandTPd then
         if DoTP(CurIsland.Portal) then
-            IslandTPd=true task.wait(1.5)
-            for _=1,10 do if #FindEnemies(CurIsland)>0 then break end task.wait(0.3) end
+            IslandTPd=true task.wait(0.8)
+            for _=1,8 do if #FindEnemies(CurIsland)>0 then break end task.wait(0.2) end
             LastEnemy=tick()
-            if F.AutoSpawn and not SpawnDone then SpawnCrystal(CurIsland) SpawnDone=true task.wait(0.3) end
-            if F.AutoQuest and QState=="NONE" then task.wait(0.2) QuestAccept(CurIsland) end
-        else task.wait(2) end
+            if F.AutoSpawn and not SpawnDone then SpawnCrystal(CurIsland) SpawnDone=true task.wait(0.2) end
+            if F.AutoQuest and QState=="NONE" then task.wait(0.1) QuestAccept(CurIsland) end
+        else task.wait(1) end
         return
     end
     if F.AutoQuest then
-        if QState=="NONE" then if tick()-LastQuestAccept>10 then QuestAccept(CurIsland) end
-        elseif QState=="ACTIVE" then if QCompDet then QState="COOLDOWN" QCompDet=false task.wait(1.0) QState="NONE" QuestAccept(CurIsland) end end
+        if QState=="NONE" then if tick()-LastQuestAccept>8 then QuestAccept(CurIsland) end
+        elseif QState=="ACTIVE" then if QCompDet then QState="COOLDOWN" QCompDet=false task.wait(0.5) QState="NONE" QuestAccept(CurIsland) end end
     end
     local enemies=FindEnemies(CurIsland)
     if #enemies>0 then
@@ -398,34 +506,65 @@ local function DoFarmTick()
         if CurTarget then TweenTo(CurTarget) Attack(CurTarget) end
     else
         CurTarget=nil LockTarget=nil LockA=0
-        if tick()-LastEnemy>30 then IslandTPd=false SpawnDone=false QState="NONE" LastEnemy=0 QCompDet=false HoverPos=nil end
-        task.wait(0.2)
+        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false QState="NONE" LastEnemy=0 QCompDet=false HoverPos=nil end
+        task.wait(0.15)
     end
-    if F.AutoEquip and tick()-LastEquip>4 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
+    if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
 end
 local function DoBossTick()
     if not BossTargetName then
         local nextName=PickNextBossName()
         if nextName then
             BossTargetName=nextName BossTPDone=false LastBossTP=0 ClearTgt() HoverPos=nil
-            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(GetBossIsland(nextName) or "?"),Duration=3,Icon=ICON})
+            BossCurrentIsland=GetBossIsland(nextName)
+            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(nil) end
         return
     end
     if not BossTPDone then
         local bi=GetBossIsland(BossTargetName)
         if not bi then BossTargetName=nil return end
-        if tick()-LastBossTP<5 then task.wait(0.5) return end
+        local alreadyNear=false
+        local model=CheckBoss(BossTargetName)
+        if model then
+            local bp=ModelPos(model)
+            if bp and DistTo(bp)<300 then alreadyNear=true end
+        end
+        if alreadyNear then BossTPDone=true BossCurrentIsland=bi return end
+        if tick()-LastBossTP<4 then task.wait(0.2) return end
         ClearTgt() HoverPos=nil LastBossTP=tick()
         Notify.new({Title="TP -> "..bi,Content=GetBossDisplay(BossTargetName),Duration=2,Icon=ICON})
         ForceTP(bi)
-        task.wait(4)
-        BossTPDone=true
-        for _=1,15 do
+        task.wait(1.5)
+        BossCurrentIsland=bi
+        local hrp=PlayerHRP()
+        if hrp then TweenToPoint(hrp.Position+Vector3.new(150,F.HeightOffset,150)) task.wait(0.3) end
+        for _=1,8 do
             local m=CheckBoss(BossTargetName)
-            if m and ModelPos(m) then return end
-            task.wait(0.5)
+            if m and ModelPos(m) then BossTPDone=true return end
+            task.wait(0.3)
         end
+        local m2=CheckBoss(BossTargetName)
+        if m2 and ModelPos(m2) then BossTPDone=true return end
+        if hrp then TweenToPoint(hrp.Position+Vector3.new(-300,F.HeightOffset,-300)) task.wait(0.3) end
+        for _=1,6 do
+            local m=CheckBoss(BossTargetName)
+            if m and ModelPos(m) then BossTPDone=true return end
+            task.wait(0.3)
+        end
+        local m3=CheckBoss(BossTargetName)
+        if not m3 then
+            local deadName=BossTargetName
+            BossKills=BossKills+1 Kills=Kills+1 RecordBossDeath(deadName)
+            Notify.new({Title="KILLED: "..GetBossDisplay(deadName),Content="Total: "..BossKills,Duration=4,Icon=ICON})
+            BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil task.wait(0.15)
+            local nextName=PickNextBossName()
+            if nextName then
+                BossTargetName=nextName BossTPDone=false LastBossTP=0
+                BossCurrentIsland=GetBossIsland(nextName)
+                Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
+            else ExitBossMode(deadName) end
+        else BossTPDone=true end
         return
     end
     local model=CheckBoss(BossTargetName)
@@ -434,24 +573,27 @@ local function DoBossTick()
         local deadName=BossTargetName
         BossKills=BossKills+1 Kills=Kills+1 RecordBossDeath(deadName)
         Notify.new({Title="KILLED: "..GetBossDisplay(deadName),Content="Total: "..BossKills,Duration=4,Icon=ICON})
-        BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil task.wait(0.3)
+        BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil task.wait(0.15)
         local nextName=PickNextBossName()
         if nextName then
-            BossTargetName=nextName BossTPDone=false LastBossTP=0
-            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(GetBossIsland(nextName) or "?"),Duration=3,Icon=ICON})
+            BossTargetName=nextName
+            local nextIsland=GetBossIsland(nextName)
+            if nextIsland==BossCurrentIsland then
+                BossTPDone=true
+            else
+                BossTPDone=false LastBossTP=0
+                BossCurrentIsland=nextIsland
+            end
+            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(nextIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(deadName) end
         return
     end
     local bossP=ModelPos(model)
-    if not bossP then
-        BossTPDone=false
-        task.wait(1)
-        return
-    end
+    if not bossP then BossTPDone=false task.wait(0.3) return end
     CurTarget=model
     TweenTo(model)
     Attack(model)
-    if F.AutoEquip and tick()-LastEquip>4 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
+    if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
 end
 Hub=loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))()
 Notify=Hub.newNotify()
@@ -479,7 +621,10 @@ FSec:AddToggle({Name="Auto Quest",Flag="AutoQuest",Default=true,Callback=functio
 FSec:AddToggle({Name="Set Spawn Crystal",Flag="AutoSpawn",Default=false,Callback=function(v) F.AutoSpawn=v SpawnDone=false end}).Link:AddHelper({Text="TP to crystal on arrival"})
 FSec:AddToggle({Name="Anti-AFK",Flag="AntiAFK",Default=true,Callback=function(v) F.AntiAFK=v end}).Link:AddHelper({Text="Prevents disconnect"})
 FSec:AddDropdown({Name="Island",Default="Auto",Values=GetIslandNames(),Flag="SelectedIsland",Callback=function(v) F.SelectedIsland=v FullReset() end})
-FSec:AddSlider({Name="Height",Min=5,Max=40,Default=10,Round=0,Flag="HeightOffset",Callback=function(v) F.HeightOffset=v end})
+FSec:AddDropdown({Name="Farm Style",Default="Plank",Values={"Plank","Behind"},Flag="FarmMode",Callback=function(v) F.FarmMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Plank = hover above | Behind = stand behind"})
+FSec:AddDropdown({Name="Move Mode",Default="Tween",Values={"Tween","Teleport"},Flag="MoveMode",Callback=function(v) F.MoveMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Tween = smooth | Teleport = instant"})
+FSec:AddSlider({Name="Height (Plank)",Min=5,Max=40,Default=10,Round=0,Flag="HeightOffset",Callback=function(v) F.HeightOffset=v end})
+FSec:AddSlider({Name="Behind Dist",Min=2,Max=15,Default=5,Round=0,Flag="BehindDist",Callback=function(v) F.BehindDist=v end})
 FSec:AddSlider({Name="Tween Speed",Min=20,Max=500,Default=100,Round=0,Flag="TweenSpeed",Callback=function(v) F.TweenSpeed=v end})
 FSec:AddButton({Name="Scan All NPCs",Callback=function()
     local isl=CurIsland or IslandForLevel(GetLevel())
@@ -493,9 +638,9 @@ BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Call
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
 BSec:AddToggle({Name="Anos (Academy)",Flag="AnosEnabled",Default=false,Callback=function(v) F.AnosEnabled=v if not v and BossFight and BossTargetName and IsAnosModel(BossTargetName) then FullReset() end end}).Link:AddHelper({Text="Any difficulty, auto detect"})
 BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
-task.spawn(function() task.wait(2) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
+task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
-CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests x999"})
+CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
 SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
 SSec:AddToggle({Name="Skill X",Flag="SkillX",Default=false,Callback=function(v) F.SkillX=v end}).Link:AddHelper({Text="Auto use"})
@@ -516,34 +661,34 @@ UISec:AddColorPicker({Name="Background Color",Default=Hub.Colors.BGDBColor,Callb
 UISec:AddColorPicker({Name="Stroke Color",Default=Hub.Colors.StrokeColor,Callback=function(v) Hub.Colors.StrokeColor=v Hub:RefreshCurrentColor() end})
 UISec:AddButton({Name="Copy Discord",Callback=function() pcall(function() setclipboard(DISCORD) end) Notify.new({Title="Copied",Content="Discord link copied!",Duration=2,Icon=ICON}) end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
-InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nBoss: Portal TP first, then tween to boss\nSame island after boss = resume farm\nAnos: detects any difficulty\nChest: opens x999 via UseItem"})
+InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Kills all on same island before leaving\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
 local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
 ThSec:AddDropdown({Name="Select Theme",Default="Default",Values={"Default","Dark Green","Dark Blue","Purple Rose","Skeet"},Callback=function(v) Hub:SetTheme(v) end})
 local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
 CfgUI:Init()
 Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
 SetupAntiAFK()
-task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and QState=="ACTIVE" and not BossFight then if QuestScanComplete() then QCompDet=true end end task.wait(0.15) end end)
+task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and QState=="ACTIVE" and not BossFight then if QuestScanComplete() then QCompDet=true end end task.wait(0.1) end end)
 task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end task.wait(8) end end)
 task.spawn(function()
     while Running do
-        if not F.AutoFarmLevel then task.wait(0.5) continue end
+        if not F.AutoFarmLevel then task.wait(0.3) continue end
         if not IsAlive() then
-            ClearTgt() HoverPos=nil WaitChar() task.wait(0.5)
-            if F.AutoEquip then EquipSword() task.wait(0.3) end
+            ClearTgt() HoverPos=nil WaitChar() task.wait(0.3)
+            if F.AutoEquip then EquipSword() task.wait(0.2) end
             if not BossFight then IslandTPd=false SpawnDone=false end
             LastBossTP=0 BossTPDone=false
         end
-        if not IsAlive() then task.wait(0.5) continue end
+        if not IsAlive() then task.wait(0.3) continue end
         if(F.BossEnabled or F.AnosEnabled) and not BossFight then
             local nextName=PickNextBossName()
             if nextName then
-                BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
-                Notify.new({Title="BOSS: "..GetBossDisplay(nextName),Content="On "..(GetBossIsland(nextName) or "?").." | Stopping farm",Duration=4,Icon=ICON})
+                BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 BossCurrentIsland=GetBossIsland(nextName) ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                Notify.new({Title="BOSS: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?").." | Stopping farm",Duration=4,Icon=ICON})
             end
         end
-        if BossFight then DoBossTick() task.wait(0.12) continue end
+        if BossFight then DoBossTick() task.wait(0.1) continue end
         DoFarmTick()
-        task.wait(0.12)
+        task.wait(0.1)
     end
 end)
