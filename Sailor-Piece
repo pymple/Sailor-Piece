@@ -1,0 +1,913 @@
+--[[ Pimple v7.5 - Sailor Piece Auto Farm ]]
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualUser = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local AVATAR_ICON = "rbxthumb://type=AvatarHeadShot&id=583572860&w=420&h=420"
+local DISCORD_INVITE = "https://discord.gg/B3PurfCy"
+
+local IslandProgression = {
+    { Portal = "Starter",    FarmUntil = 250,    Enemies = {"Thief"},                          BossPattern = "ThiefBoss",    Quest = {"QuestNPC1"} },
+    { Portal = "Jungle",     FarmUntil = 750,    Enemies = {"Monkey"},                         BossPattern = "MonkeyBoss",   Quest = {"QuestNPC2"} },
+    { Portal = "Desert",     FarmUntil = 1500,   Enemies = {"DesertBandit","Desert Bandit"},    BossPattern = "DesertBoss",   Quest = {"QuestNPC3"} },
+    { Portal = "Snow",       FarmUntil = 3000,   Enemies = {"Frost","Snow","FrostRogue"},       BossPattern = "SnowBoss",     Quest = {"QuestNPC4"} },
+    { Portal = "Shibuya",    FarmUntil = 5000,   Enemies = {"Sorcerer","CurseUser"},            BossPattern = "ShibuyaBoss",  Quest = {"QuestNPC5"} },
+    { Portal = "HuecoMundo", FarmUntil = 6250,   Enemies = {"Hollow","Arrancar"},               BossPattern = "HuecoBoss",    Quest = {"QuestNPC6"} },
+    { Portal = "Shinjuku",   FarmUntil = 8000,   Enemies = {"StrongSorcerer","CurseHunter"},    BossPattern = "ShinjukuBoss", Quest = {"QuestNPC7"} },
+    { Portal = "Slime",      FarmUntil = 9000,   Enemies = {"Slime"},                          BossPattern = "SlimeBoss",    Quest = {"QuestNPC8"} },
+    { Portal = "Academy",    FarmUntil = 10000,  Enemies = {"Academy","Student"},               BossPattern = "AcademyBoss",  Quest = {"QuestNPC9"} },
+    { Portal = "Judgement",  FarmUntil = 999999, Enemies = {"Judgement","Judge"},                BossPattern = "JudgementBoss",Quest = {"QuestNPC10"} },
+}
+
+local IgnoreNPCs = {
+    "questnpc", "groupreward", "katana", "buyer", "madoka",
+    "training", "dummy", "merchant", "shop", "vendor",
+    "shadow questline", "shadowmonarch", "obshakilsinhead",
+    "buff", "service",
+}
+
+local BossKeywords = {"boss","king","warden","sukuna","gojo","jinwoo","monarch","aizen","ichigo","ulquiorra","alpha","omega","admiral","empress","dragon","commander","general","champion","raid"}
+
+local Flags = {
+    AutoFarmLevel = false, BehindOffset = 5, SwingSpeed = 0.28,
+    AntiAFK = true, AutoEquip = true, AutoQuest = true, SelectedIsland = "Auto",
+    TweenSpeed = 100,
+}
+local KillCount, SessionStartTime = 0, tick()
+local pimpleHUB, Notifier, Window, ConfigManager
+local AutoFarmLevelToggle
+local ClockRunning = true
+local CurrentIsland, CurrentTarget = nil, nil
+local Connections = {}
+local LastEquipCheck, LastQuestTime, LastTeleportTime = 0, 0, 0
+local CachedEnemies = {}
+local CacheTime = 0
+local CACHE_TTL = 0.3
+local QuestKillCount = 0
+local QuestKillGoal = 10
+local LastQuestReaccept = 0
+local LastEnemySeenTime = 0
+local TeleportCount = 0
+local LastTeleportReset = tick()
+local ConfirmedLevel = 0
+local ActiveTween = nil
+
+local function AddConnection(c) table.insert(Connections, c) return c end
+local function IsTyping() return UserInputService:GetFocusedTextBox() ~= nil end
+
+local function Jitter(base, variance)
+    return base + (math.random() * variance * 2 - variance)
+end
+
+local function StopTween()
+    if ActiveTween then
+        pcall(function() ActiveTween:Cancel() end)
+        ActiveTween = nil
+    end
+end
+
+local function TweenTo(targetCFrame, callback)
+    StopTween()
+    local char = LocalPlayer.Character
+    if not char then if callback then callback() end return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then if callback then callback() end return end
+
+    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    if dist < 2 then
+        hrp.CFrame = targetCFrame
+        if callback then callback() end
+        return
+    end
+
+    local speed = math.max(Flags.TweenSpeed, 20)
+    local duration = dist / speed
+    duration = math.clamp(duration, 0.08, 8)
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+    ActiveTween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    ActiveTween.Completed:Connect(function()
+        ActiveTween = nil
+        if callback then callback() end
+    end)
+    ActiveTween:Play()
+end
+
+local function TweenToAndWait(targetCFrame)
+    local done = false
+    TweenTo(targetCFrame, function() done = true end)
+    local timeout = tick()
+    while not done and tick() - timeout < 10 do
+        task.wait(0.05)
+    end
+end
+
+local function ToggleAutoFarmLevel()
+    Flags.AutoFarmLevel = not Flags.AutoFarmLevel
+    if AutoFarmLevelToggle then
+        pcall(function()
+            if AutoFarmLevelToggle.Set then AutoFarmLevelToggle:Set(Flags.AutoFarmLevel) end
+        end)
+    end
+    if not Flags.AutoFarmLevel then
+        StopTween()
+    end
+end
+
+local function SetupAntiAFK()
+    pcall(function()
+        AddConnection(LocalPlayer.Idled:Connect(function()
+            if Flags.AntiAFK then
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                end)
+            end
+        end))
+    end)
+    task.spawn(function()
+        while ClockRunning do
+            task.wait(Jitter(55, 15))
+            if Flags.AntiAFK then
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                end)
+            end
+        end
+    end)
+end
+
+local function GetPlayerLevel()
+    local level = 0
+    pcall(function()
+        local ls = LocalPlayer:FindFirstChild("leaderstats")
+        if ls then
+            local v = ls:FindFirstChild("Level") or ls:FindFirstChild("Lvl") or ls:FindFirstChild("LVL")
+            if v then level = tonumber(v.Value) or 0 end
+        end
+    end)
+    if level > 0 then ConfirmedLevel = level return level end
+    pcall(function()
+        for _, child in ipairs(LocalPlayer:GetDescendants()) do
+            if (child:IsA("IntValue") or child:IsA("NumberValue") or child:IsA("StringValue")) then
+                local n = child.Name:lower()
+                if n == "level" or n == "lvl" then
+                    local val = tonumber(child.Value)
+                    if val and val > level then level = val end
+                end
+            end
+        end
+    end)
+    if level > 0 then ConfirmedLevel = level return level end
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then
+            for _, d in ipairs(pg:GetDescendants()) do
+                if d:IsA("TextLabel") or d:IsA("TextButton") then
+                    local m = (d.Text or ""):match("Lv%.%s*(%d[%d,%.]*)")
+                    if m then
+                        m = m:gsub(",","")
+                        local val = tonumber(m)
+                        if val and val > level then level = val end
+                    end
+                end
+            end
+        end
+    end)
+    if level > 0 then ConfirmedLevel = level return level end
+    return ConfirmedLevel
+end
+
+local function GetIslandForLevel(lvl)
+    for _, island in ipairs(IslandProgression) do
+        if lvl < island.FarmUntil then return island end
+    end
+    return IslandProgression[#IslandProgression]
+end
+
+local function GetIslandByName(name)
+    for _, island in ipairs(IslandProgression) do
+        if island.Portal == name then return island end
+    end
+    return nil
+end
+
+local function CanTeleport()
+    if tick() - LastTeleportTime < 10 then return false end
+    if tick() - LastTeleportReset > 120 then
+        TeleportCount = 0
+        LastTeleportReset = tick()
+    end
+    if TeleportCount >= 3 then return false end
+    return true
+end
+
+local function TeleportToIsland(portal)
+    if not CanTeleport() then return false end
+    LastTeleportTime = tick()
+    TeleportCount = TeleportCount + 1
+    local success = false
+    pcall(function()
+        ReplicatedStorage:WaitForChild("Remotes",5):WaitForChild("TeleportToPortal",5):FireServer(portal)
+        success = true
+    end)
+    return success
+end
+
+local function FindQuestRemote(remoteName)
+    local paths = {
+        {"RemoteEvents", remoteName},
+        {"Remotes", remoteName},
+        {"Events", remoteName},
+        {"CombatSystem", "Remotes", remoteName},
+    }
+    for _, path in ipairs(paths) do
+        local current = ReplicatedStorage
+        local found = true
+        for _, segment in ipairs(path) do
+            current = current:FindFirstChild(segment)
+            if not current then found = false break end
+        end
+        if found then return current end
+    end
+    for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+        if desc:IsA("RemoteEvent") and desc.Name == remoteName then
+            return desc
+        end
+    end
+    return nil
+end
+
+local function AcceptQuests(list)
+    if tick() - LastQuestTime < 2 then return end
+    LastQuestTime = tick()
+    for _, q in ipairs(list) do
+        task.wait(Jitter(0.15, 0.05))
+        pcall(function()
+            local remote = FindQuestRemote("QuestAccept")
+            if remote then remote:FireServer(q) end
+        end)
+        pcall(function()
+            local remote = FindQuestRemote("AcceptQuest")
+            if remote then remote:FireServer(q) end
+        end)
+        pcall(function()
+            local remote = FindQuestRemote("StartQuest")
+            if remote then remote:FireServer(q) end
+        end)
+    end
+end
+
+local function AbandonQuest()
+    pcall(function()
+        local remote = FindQuestRemote("QuestAbandon") or FindQuestRemote("AbandonQuest")
+        if remote then remote:FireServer("repeatable") end
+    end)
+end
+
+local function SmartQuestCycle()
+    if not CurrentIsland or not CurrentIsland.Quest then return end
+    AbandonQuest()
+    task.wait(Jitter(0.4, 0.15))
+    LastQuestTime = 0
+    AcceptQuests(CurrentIsland.Quest)
+    QuestKillCount = 0
+    LastQuestReaccept = tick()
+end
+
+local function ShouldIgnore(name)
+    local lower = name:lower()
+    for _, ignore in ipairs(IgnoreNPCs) do
+        if lower:find(ignore, 1, true) then return true end
+    end
+    return false
+end
+
+local function IsBoss(name)
+    local lower = name:lower()
+    for _, kw in ipairs(BossKeywords) do
+        if lower:find(kw, 1, true) then return true end
+    end
+    return false
+end
+
+local function IsPlayerChar(model)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character == model then return true end
+    end
+    return false
+end
+
+local function MatchesEnemyName(modelName, island)
+    if not island then return true end
+    local lower = modelName:lower()
+    for _, enemyBase in ipairs(island.Enemies) do
+        if lower:find(enemyBase:lower(), 1, true) then return true end
+    end
+    return false
+end
+
+local function FindEnemies(island)
+    if tick() - CacheTime < CACHE_TTL and #CachedEnemies > 0 then
+        local alive = {}
+        for _, e in ipairs(CachedEnemies) do
+            local hum = e:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 and e.Parent then
+                table.insert(alive, e)
+            end
+        end
+        if #alive > 0 then
+            CachedEnemies = alive
+            return alive
+        end
+    end
+
+    local enemies = {}
+    local npcsFolder = workspace:FindFirstChild("NPCs")
+    if not npcsFolder then return enemies end
+
+    for _, model in ipairs(npcsFolder:GetChildren()) do
+        if model:IsA("Model") and not IsPlayerChar(model) then
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 and not IsBoss(model.Name) and not ShouldIgnore(model.Name) then
+                if not island or MatchesEnemyName(model.Name, island) then
+                    table.insert(enemies, model)
+                end
+            end
+        end
+    end
+
+    if #enemies == 0 and island then
+        for _, model in ipairs(npcsFolder:GetChildren()) do
+            if model:IsA("Model") and not IsPlayerChar(model) then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 and not IsBoss(model.Name) and not ShouldIgnore(model.Name) then
+                    table.insert(enemies, model)
+                end
+            end
+        end
+    end
+
+    CachedEnemies = enemies
+    CacheTime = tick()
+    return enemies
+end
+
+local function WaitForEnemies(island, maxWait)
+    local start = tick()
+    while tick() - start < maxWait do
+        local enemies = FindEnemies(island)
+        if #enemies > 0 then return enemies end
+        CachedEnemies = {}
+        CacheTime = 0
+        task.wait(0.3)
+    end
+    return {}
+end
+
+local function GetNearest(enemies)
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local best, bestD = nil, math.huge
+    for _, e in ipairs(enemies) do
+        local root = e:FindFirstChild("HumanoidRootPart") or e:FindFirstChild("Torso") or e:FindFirstChild("UpperTorso")
+        if root then
+            local d = (root.Position - hrp.Position).Magnitude
+            if d < bestD then bestD, best = d, e end
+        end
+    end
+    return best
+end
+
+local function GetEquippedTool()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, c in ipairs(char:GetChildren()) do
+        if c:IsA("Tool") then return c end
+    end
+    return nil
+end
+
+local function EquipSword()
+    local eq = GetEquippedTool()
+    if eq and eq.Name:lower() ~= "combat" then return end
+    if eq and eq.Name:lower() == "combat" then
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:UnequipTools() end
+        task.wait(Jitter(0.25, 0.1))
+    end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if not bp then return end
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    for _, c in ipairs(bp:GetChildren()) do
+        if c:IsA("Tool") and c.Name:lower() ~= "combat" then
+            hum:EquipTool(c)
+            return
+        end
+    end
+end
+
+local function GetEnemyRoot(enemy)
+    if not enemy then return nil end
+    return enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Torso") or enemy:FindFirstChild("UpperTorso")
+end
+
+local function GetBehindCFrame(enemy)
+    if not enemy then return nil end
+    local root = GetEnemyRoot(enemy)
+    if not root then return nil end
+    local enemyCF = root.CFrame
+    local behindPos = enemyCF.Position - enemyCF.LookVector * Flags.BehindOffset
+    behindPos = behindPos + Vector3.new(Jitter(0, 0.6), 0, Jitter(0, 0.6))
+    local lookAt = Vector3.new(root.Position.X, behindPos.Y, root.Position.Z)
+    return CFrame.new(behindPos, lookAt)
+end
+
+local function IsCloseEnough(targetPos, maxDist)
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    return (hrp.Position - targetPos).Magnitude <= maxDist
+end
+
+local function MoveToTarget(enemy)
+    if not enemy then return end
+    local root = GetEnemyRoot(enemy)
+    if not root then return end
+    local behindCF = GetBehindCFrame(enemy)
+    if not behindCF then return end
+    TweenToAndWait(behindCF)
+end
+
+local function Attack(target)
+    local targetRoot = target and GetEnemyRoot(target)
+    pcall(function()
+        local remotes = ReplicatedStorage:WaitForChild("CombatSystem", 2):WaitForChild("Remotes", 2)
+        local requestHit = remotes:WaitForChild("RequestHit", 2)
+        requestHit:FireServer(target)
+    end)
+
+    local tool = GetEquippedTool()
+    if tool then
+        pcall(function() tool:Activate() end)
+        if target and targetRoot then
+            local handle = tool:FindFirstChild("Handle")
+            if handle then
+                pcall(function()
+                    firetouchinterest(handle, targetRoot, 0)
+                    task.delay(Jitter(0.06, 0.02), function()
+                        pcall(function() firetouchinterest(handle, targetRoot, 1) end)
+                    end)
+                end)
+                task.wait(Jitter(0.04, 0.02))
+                local backup = target:FindFirstChild("Torso") or target:FindFirstChild("UpperTorso")
+                if backup and backup ~= targetRoot then
+                    pcall(function()
+                        firetouchinterest(handle, backup, 0)
+                        task.delay(Jitter(0.06, 0.02), function()
+                            pcall(function() firetouchinterest(handle, backup, 1) end)
+                        end)
+                    end)
+                end
+            end
+        end
+    end
+end
+
+local function OnCharacterAdded(char)
+    char:WaitForChild("Humanoid", 10)
+    if Flags.AutoEquip then
+        task.spawn(function()
+            for _ = 1, 30 do
+                task.wait(Jitter(0.4, 0.15))
+                local eq = GetEquippedTool()
+                if eq and eq.Name:lower() ~= "combat" then break end
+                EquipSword()
+            end
+        end)
+    end
+end
+if LocalPlayer.Character then task.spawn(function() OnCharacterAdded(LocalPlayer.Character) end) end
+AddConnection(LocalPlayer.CharacterAdded:Connect(OnCharacterAdded))
+
+local function GetSessionTime()
+    local e = tick() - SessionStartTime
+    return string.format("%02d:%02d", math.floor(e/60), math.floor(e%60))
+end
+
+local function GetIslandNames()
+    local n = {"Auto"}
+    for _, i in ipairs(IslandProgression) do table.insert(n, i.Portal) end
+    return n
+end
+
+pimpleHUB = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))()
+Notifier = pimpleHUB.newNotify()
+ConfigManager = pimpleHUB:ConfigManager({Directory = "pimpleHUB", Config = "Pimple-Configs"})
+pimpleHUB.Colors.Highlight = Color3.fromRGB(220, 60, 60)
+pimpleHUB.Colors.Toggle = Color3.fromRGB(220, 60, 60)
+pimpleHUB:Loader(AVATAR_ICON, 2).yield()
+
+Window = pimpleHUB.new({
+    Name = "PIMPLE v7.5",
+    Keybind = "LeftAlt",
+    Logo = AVATAR_ICON,
+    TextSize = 18,
+    Font = Enum.Font.GothamBold
+})
+Window.OnToggle = function() end
+
+Notifier.new({
+    Title = "pimpleHUB v7.5",
+    Content = "Left Alt = UI\nV = Toggle Auto Farm\nB = Manual Attack\nAnti-AFK: ON",
+    Duration = 5,
+    Icon = AVATAR_ICON
+})
+
+local Watermark = Window:Watermark()
+Watermark:AddText({Icon = "user", Text = LocalPlayer.DisplayName})
+Watermark:AddText({Icon = "clock", Text = pimpleHUB:GetDate()})
+local LiveTime = Watermark:AddText({Icon = "timer", Text = "TIME"})
+task.spawn(function()
+    while ClockRunning do
+        task.wait(1)
+        pcall(function() LiveTime:SetText(pimpleHUB:GetTimeNow()) end)
+    end
+end)
+Watermark:AddText({Icon = "server", Text = pimpleHUB.Version})
+
+Window:DrawCategory({Name = "AUTO FARM"})
+local FarmTab = Window:DrawTab({Name = "Farm", Icon = "sword", EnableScrolling = true})
+local FarmSection = FarmTab:DrawSection({Name = "Auto Farm Level", Position = "left"})
+
+AutoFarmLevelToggle = FarmSection:AddToggle({
+    Name = "Auto Farm Level",
+    Flag = "AutoFarmLevel",
+    Default = false,
+    Callback = function(v)
+        Flags.AutoFarmLevel = v
+        if not v then
+            StopTween()
+            CurrentIsland = nil
+            CurrentTarget = nil
+        end
+    end
+})
+AutoFarmLevelToggle.Link:AddKeybind({Default = "V", Flag = "FarmLevelKeybind", Callback = ToggleAutoFarmLevel})
+AutoFarmLevelToggle.Link:AddHelper({Text = "Tween behind enemies & attack"})
+
+FarmSection:AddToggle({Name = "Auto Equip Sword", Flag = "AutoEquip", Default = true, Callback = function(v) Flags.AutoEquip = v end})
+FarmSection:AddToggle({Name = "Auto Quest", Flag = "AutoQuest", Default = true, Callback = function(v) Flags.AutoQuest = v end})
+
+FarmSection:AddDropdown({
+    Name = "Island",
+    Default = "Auto",
+    Values = GetIslandNames(),
+    Flag = "SelectedIsland",
+    Callback = function(v) Flags.SelectedIsland = v CurrentIsland = nil end
+})
+
+FarmSection:AddSlider({Name = "Behind Distance", Min = 3, Max = 12, Default = 5, Round = 1, Flag = "BehindOffset", Callback = function(v) Flags.BehindOffset = v end})
+FarmSection:AddSlider({Name = "Tween Speed", Min = 20, Max = 500, Default = 100, Round = 0, Flag = "TweenSpeed", Callback = function(v) Flags.TweenSpeed = v end})
+FarmSection:AddSlider({Name = "Attack Speed", Min = 0.15, Max = 1.5, Default = 0.28, Round = 2, Flag = "SwingSpeed", Callback = function(v) Flags.SwingSpeed = v end})
+FarmSection:AddSlider({Name = "Quest Kill Goal", Min = 5, Max = 30, Default = 10, Round = 0, Flag = "QuestKillGoal", Callback = function(v) QuestKillGoal = v end})
+
+FarmSection:AddButton({
+    Name = "Show Level & Target",
+    Callback = function()
+        local lvl = GetPlayerLevel()
+        local island = GetIslandForLevel(lvl)
+        local enemies = FindEnemies(island)
+        Notifier.new({
+            Title = "Lv."..lvl.." -> "..island.Portal,
+            Content = "Farm until Lv."..island.FarmUntil.."\nEnemies found: "..#enemies.."\nTarget: "..(CurrentTarget and CurrentTarget.Name or "None").."\nQuest: "..table.concat(island.Quest,", ").."\nQuest Kills: "..QuestKillCount.."/"..QuestKillGoal.."\nTP Count: "..TeleportCount,
+            Duration = 6,
+            Icon = AVATAR_ICON
+        })
+    end
+})
+
+FarmSection:AddButton({
+    Name = "Scan Enemies",
+    Callback = function()
+        CachedEnemies = {}
+        CacheTime = 0
+        local enemies = FindEnemies(CurrentIsland)
+        local info = {}
+        for i, e in ipairs(enemies) do
+            if i > 15 then table.insert(info, "+"..tostring(#enemies-15).." more") break end
+            local hum = e:FindFirstChildOfClass("Humanoid")
+            table.insert(info, e.Name.." [in:"..e.Parent.Name.."] HP:"..(hum and math.floor(hum.Health) or 0))
+        end
+        Notifier.new({
+            Title = "Enemies: "..#enemies,
+            Content = #info > 0 and table.concat(info,"\n") or "NONE",
+            Duration = 8,
+            Icon = AVATAR_ICON
+        })
+    end
+})
+
+FarmSection:AddButton({
+    Name = "Dump NPCs Folder",
+    Callback = function()
+        local npcs = workspace:FindFirstChild("NPCs")
+        if not npcs then
+            Notifier.new({Title = "ERROR", Content = "workspace.NPCs NOT FOUND", Duration = 5, Icon = AVATAR_ICON})
+            return
+        end
+        local info = {}
+        for _, c in ipairs(npcs:GetChildren()) do
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            local hp = hum and math.floor(hum.Health) or -1
+            table.insert(info, c.Name.." ("..c.ClassName..") HP:"..hp)
+        end
+        Notifier.new({
+            Title = "NPCs: "..#npcs:GetChildren(),
+            Content = table.concat(info,"\n"),
+            Duration = 12,
+            Icon = AVATAR_ICON
+        })
+    end
+})
+
+FarmSection:AddButton({
+    Name = "Dump Quest Remotes",
+    Callback = function()
+        local info = {}
+        for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+            if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
+                local n = desc.Name:lower()
+                if n:find("quest") or n:find("accept") or n:find("abandon") or n:find("start") or n:find("npc") then
+                    table.insert(info, desc:GetFullName().." ["..desc.ClassName.."]")
+                end
+            end
+        end
+        Notifier.new({
+            Title = "Quest Remotes: "..#info,
+            Content = #info > 0 and table.concat(info,"\n") or "NONE FOUND",
+            Duration = 12,
+            Icon = AVATAR_ICON
+        })
+    end
+})
+
+FarmSection:AddButton({
+    Name = "Force Accept Quest",
+    Callback = function()
+        local island = GetIslandForLevel(GetPlayerLevel())
+        LastQuestTime = 0
+        AcceptQuests(island.Quest)
+        Notifier.new({Title = "Quest", Content = "Tried: "..table.concat(island.Quest,", "), Duration = 3, Icon = AVATAR_ICON})
+    end
+})
+
+FarmSection:AddButton({
+    Name = "Abandon Quest",
+    Callback = function()
+        AbandonQuest()
+        QuestKillCount = 0
+        Notifier.new({Title = "Quest", Content = "Abandoned", Duration = 2, Icon = AVATAR_ICON})
+    end
+})
+
+FarmSection:AddButton({
+    Name = "Debug Sword",
+    Callback = function()
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        local info = {}
+        if bp then for _, c in ipairs(bp:GetChildren()) do table.insert(info, c.Name) end end
+        Notifier.new({
+            Title = "Equipped: "..(GetEquippedTool() and GetEquippedTool().Name or "None"),
+            Content = "Backpack: "..(#info > 0 and table.concat(info,", ") or "empty"),
+            Duration = 5,
+            Icon = AVATAR_ICON
+        })
+    end
+})
+
+local InfoSection = FarmTab:DrawSection({Name = "Info", Position = "right"})
+InfoSection:AddParagraph({
+    Title = "How It Works",
+    Content = "1. Detects your level\n2. Picks the right island\n3. Teleports ONCE via portal\n4. Polls for enemies immediately\n5. Tweens behind target at adjustable speed\n6. Fires RequestHit + sword + touch\n7. Auto re-accepts quest on completion\n8. Abandons old quest on island change\n\nKeybinds:\n  V = Toggle Auto Farm\n  B = Manual Attack\n  Left Alt = Toggle UI"
+})
+
+InfoSection:AddParagraph({
+    Title = "Progression",
+    Content = "Starter: Thief -> til 250\nJungle: Monkey -> til 750\nDesert: Bandit -> til 1500\nSnow: Frost -> til 3000\nShibuya: Sorc -> til 5000\nHuecoMundo: Hollow -> til 6250\nShinjuku: Strong -> til 8000\nSlime: Slime -> til 9000\nAcademy: -> til 10000\nJudgement: Endgame"
+})
+
+local StatsSection = FarmTab:DrawSection({Name = "Session Stats", Position = "right"})
+StatsSection:AddButton({
+    Name = "Show Stats",
+    Callback = function()
+        Notifier.new({
+            Title = "Stats",
+            Content = "Time: "..GetSessionTime().." | Kills: "..KillCount.."\nLevel: "..GetPlayerLevel().." | Island: "..(CurrentIsland and CurrentIsland.Portal or "None").."\nTarget: "..(CurrentTarget and CurrentTarget.Name or "None").."\nSword: "..(GetEquippedTool() and GetEquippedTool().Name or "None").."\nQuest Kills: "..QuestKillCount.."/"..QuestKillGoal.."\nTeleports: "..TeleportCount.."\nTween Speed: "..Flags.TweenSpeed,
+            Duration = 5,
+            Icon = AVATAR_ICON
+        })
+    end
+})
+StatsSection:AddButton({
+    Name = "Reset Stats",
+    Callback = function()
+        KillCount = 0
+        QuestKillCount = 0
+        TeleportCount = 0
+        SessionStartTime = tick()
+        Notifier.new({Title = "Reset", Content = "Stats cleared", Duration = 2, Icon = AVATAR_ICON})
+    end
+})
+
+Window:DrawCategory({Name = "SETTINGS"})
+local SettingsTab = Window:DrawTab({Name = "Settings", Icon = "settings-3", Type = "Single", EnableScrolling = true})
+local ThemesTab = Window:DrawTab({Name = "Themes", Icon = "paintbrush", Type = "Single"})
+
+local UISettings = SettingsTab:DrawSection({Name = "UI Settings", Position = "left"})
+UISettings:AddToggle({Name = "Anti-AFK", Flag = "AntiAFK", Default = true, Callback = function(v) Flags.AntiAFK = v end})
+UISettings:AddToggle({Name = "Always Show Frame", Default = false, Callback = function(v) Window.AlwayShowTab = v end})
+UISettings:AddColorPicker({Name = "Highlight", Default = pimpleHUB.Colors.Highlight, Callback = function(v) pimpleHUB.Colors.Highlight = v pimpleHUB:RefreshCurrentColor() end})
+UISettings:AddColorPicker({Name = "Toggle Color", Default = pimpleHUB.Colors.Toggle, Callback = function(v) pimpleHUB.Colors.Toggle = v pimpleHUB:RefreshCurrentColor() end})
+UISettings:AddColorPicker({Name = "Drop Color", Default = pimpleHUB.Colors.DropColor, Callback = function(v) pimpleHUB.Colors.DropColor = v pimpleHUB:RefreshCurrentColor() end})
+UISettings:AddColorPicker({Name = "Block Color", Default = pimpleHUB.Colors.BlockColor, Callback = function(v) pimpleHUB.Colors.BlockColor = v pimpleHUB:RefreshCurrentColor() end})
+UISettings:AddColorPicker({Name = "Background Color", Default = pimpleHUB.Colors.BGDBColor, Callback = function(v) pimpleHUB.Colors.BGDBColor = v pimpleHUB:RefreshCurrentColor() end})
+UISettings:AddColorPicker({Name = "Stroke Color", Default = pimpleHUB.Colors.StrokeColor, Callback = function(v) pimpleHUB.Colors.StrokeColor = v pimpleHUB:RefreshCurrentColor() end})
+UISettings:AddButton({
+    Name = "Copy Discord",
+    Callback = function()
+        pcall(function() setclipboard(DISCORD_INVITE) end)
+        Notifier.new({Title = "Copied", Content = "Discord link copied!", Duration = 2, Icon = AVATAR_ICON})
+    end
+})
+
+local InfoSettingsSection = SettingsTab:DrawSection({Name = "Info", Position = "right"})
+InfoSettingsSection:AddParagraph({
+    Title = "pimpleHUB v7.5",
+    Content = "Keybinds:\n  Left Alt = Toggle UI\n  V = Toggle Auto Farm\n  B = Manual Attack\n\nEnemies: workspace.NPCs\nQuest NPCs: QuestNPC1-10\nCombat: RequestHit remote\nSword: equips blade, skips Combat\nMode: Tween behind & swing"
+})
+
+local ThemeSettings = ThemesTab:DrawSection({Name = "UI Themes", Position = "left"})
+ThemeSettings:AddDropdown({Name = "Select Theme", Default = "Default", Values = {"Default","Dark Green","Dark Blue","Purple Rose","Skeet"}, Callback = function(v) pimpleHUB:SetTheme(v) end})
+
+local ConfigUI = Window:DrawConfig({Name = "Config", Icon = "folder", Config = ConfigManager})
+ConfigUI:Init()
+
+AddConnection(UserInputService.InputBegan:Connect(function(input, gp)
+    if gp or IsTyping() then return end
+    if input.KeyCode == Enum.KeyCode.V then
+        ToggleAutoFarmLevel()
+    elseif input.KeyCode == Enum.KeyCode.B then
+        CachedEnemies = {}
+        CacheTime = 0
+        local enemies = FindEnemies(CurrentIsland)
+        local nearest = GetNearest(enemies)
+        if nearest then
+            MoveToTarget(nearest)
+            Attack(nearest)
+        end
+    end
+end))
+
+SetupAntiAFK()
+
+local IslandTeleported = false
+local QuestAccepted = false
+local IslandLoadTimer = 0
+
+task.spawn(function()
+    while ClockRunning do
+        if Flags.AutoFarmLevel then
+            local playerLevel = GetPlayerLevel()
+
+            if playerLevel == 0 then
+                task.wait(1)
+                continue
+            end
+
+            local targetIsland
+            if Flags.SelectedIsland == "Auto" then
+                targetIsland = GetIslandForLevel(playerLevel)
+            else
+                targetIsland = GetIslandByName(Flags.SelectedIsland) or GetIslandForLevel(playerLevel)
+            end
+
+            if not CurrentIsland or CurrentIsland.Portal ~= targetIsland.Portal then
+                if CurrentIsland then
+                    StopTween()
+                    AbandonQuest()
+                    task.wait(Jitter(0.5, 0.15))
+                end
+                CurrentIsland = targetIsland
+                IslandTeleported = false
+                QuestAccepted = false
+                CurrentTarget = nil
+                CachedEnemies = {}
+                CacheTime = 0
+                QuestKillCount = 0
+                LastQuestReaccept = 0
+                LastEnemySeenTime = 0
+                Notifier.new({
+                    Title = "-> "..targetIsland.Portal,
+                    Content = "Lv."..playerLevel.." | Farm until Lv."..targetIsland.FarmUntil,
+                    Duration = 4,
+                    Icon = AVATAR_ICON
+                })
+            end
+
+            if not IslandTeleported then
+                if CanTeleport() then
+                    local didTP = TeleportToIsland(CurrentIsland.Portal)
+                    if didTP then
+                        IslandTeleported = true
+                        IslandLoadTimer = tick()
+                        task.wait(2)
+                        local enemies = WaitForEnemies(CurrentIsland, 8)
+                        if #enemies > 0 then
+                            LastEnemySeenTime = tick()
+                        end
+                        if Flags.AutoQuest and CurrentIsland.Quest and not QuestAccepted then
+                            task.wait(Jitter(0.3, 0.1))
+                            AcceptQuests(CurrentIsland.Quest)
+                            QuestAccepted = true
+                            QuestKillCount = 0
+                            LastQuestReaccept = tick()
+                        end
+                    else
+                        task.wait(5)
+                    end
+                else
+                    task.wait(5)
+                end
+                continue
+            end
+
+            if not QuestAccepted and Flags.AutoQuest and CurrentIsland.Quest then
+                AcceptQuests(CurrentIsland.Quest)
+                QuestAccepted = true
+                QuestKillCount = 0
+                LastQuestReaccept = tick()
+            end
+
+            CachedEnemies = {}
+            CacheTime = 0
+            local enemies = FindEnemies(CurrentIsland)
+
+            if #enemies > 0 then
+                LastEnemySeenTime = tick()
+                local nearest = GetNearest(enemies)
+                if nearest then
+                    CurrentTarget = nearest
+                    MoveToTarget(nearest)
+
+                    local root = GetEnemyRoot(nearest)
+                    local hum = nearest:FindFirstChildOfClass("Humanoid")
+                    if root and hum and hum.Health > 0 and IsCloseEnough(root.Position, 15) then
+                        Attack(nearest)
+
+                        if hum.Health <= 0 then
+                            KillCount = KillCount + 1
+                            QuestKillCount = QuestKillCount + 1
+                            CurrentTarget = nil
+                            task.wait(Jitter(0.3, 0.1))
+
+                            if Flags.AutoQuest and QuestKillCount >= QuestKillGoal then
+                                task.wait(Jitter(0.5, 0.2))
+                                SmartQuestCycle()
+                            end
+                        end
+                    end
+                end
+            else
+                if LastEnemySeenTime > 0 and tick() - LastEnemySeenTime > 60 and CanTeleport() then
+                    IslandTeleported = false
+                    QuestAccepted = false
+                    LastEnemySeenTime = 0
+                end
+                task.wait(0.5)
+            end
+
+            if Flags.AutoEquip and tick() - LastEquipCheck > Jitter(4, 1) then
+                LastEquipCheck = tick()
+                local eq = GetEquippedTool()
+                if not eq or eq.Name:lower() == "combat" then EquipSword() end
+            end
+
+            if Flags.AutoQuest and CurrentIsland.Quest and tick() - LastQuestReaccept > 25 and tick() - LastQuestTime > 10 then
+                SmartQuestCycle()
+            end
+
+            task.wait(Jitter(Flags.SwingSpeed, 0.06))
+        else
+            task.wait(0.5)
+        end
+    end
+end)
