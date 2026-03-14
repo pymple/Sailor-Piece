@@ -195,15 +195,19 @@ local function OpenAllChests()
 end
 local function BuyMerchantItems()
     if not F.AutoMerchant then return end
-    if tick()-LastMerchant<60 then return end
+    if tick()-LastMerchant<5 then return end
     LastMerchant=tick()
     local remote
     pcall(function() remote=WalkPathWait(RS,2,unpack(MERCHANT_REMOTE_PATH)) end)
     if not remote then return end
     for _,item in ipairs(MerchantItems) do
         if FM[item] then
-            pcall(function() remote:InvokeServer(item,1) end)
-            task.wait(0.5)
+            for _=1,15 do
+                local ok=false
+                pcall(function() remote:InvokeServer(item,1) ok=true end)
+                if not ok then break end
+                task.wait(0.1)
+            end
         end
     end
 end
@@ -229,13 +233,12 @@ local function GetNPCFolder() return workspace:FindFirstChild(NPC_FOLDER) end
 local function FindEnemies(island)
     local nf=GetNPCFolder()
     if not nf or not island then return {} end
-    local hrp=PlayerHRP() if not hrp then return {} end
     local out={}
     local function checkModel(m)
         if m:IsA("Model") and not IsPlayer(m) and not IsBoss(m.Name) then
             local hm=GetHum(m)
             if hm and hm.Health>0 and not ShouldIgnore(m.Name) then
-                if MatchEnemy(m.Name,island) then local p=ModelPos(m) if p and(hrp.Position-p).Magnitude<400 then table.insert(out,m) end end
+                if MatchEnemy(m.Name,island) then table.insert(out,m) end
             end
         end
     end
@@ -699,7 +702,7 @@ task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAl
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
 local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
-MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v end}).Link:AddHelper({Text="Buys selected items every 60s"})
+MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v end}).Link:AddHelper({Text="Buys selected items every 5s"})
 for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
 SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
