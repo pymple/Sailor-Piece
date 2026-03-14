@@ -15,6 +15,7 @@ local USE_ITEM_PATH={"Remotes","UseItem"}
 local COMBAT_HIT_PATH={"CombatSystem","Remotes","RequestHit"}
 local ABILITY_PATH={"AbilitySystem","Remotes","RequestAbility"}
 local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
+local SETTINGS_TOGGLE_PATH={"RemoteEvents","SettingsToggle"}
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
     {Portal="Jungle",FarmUntil=750,Enemies={"Monkey"},QuestNPC="QuestNPC3"},
@@ -27,6 +28,7 @@ local Islands={
     {Portal="Academy",FarmUntil=10000,Enemies={"AcademyTeacher"},QuestNPC="QuestNPC15"},
     {Portal="Judgement",FarmUntil=999999,Enemies={"Swordsman"},QuestNPC="QuestNPC16"},
 }
+local TpIslands={"Starter","Jungle","Desert","Snow","Sailor","Shibuya","HuecoMundo","Boss","Dungeon","Shinjuku","Slime","Academy","Judgement"}
 local Bosses={
     {Name="AizenBoss",Display="Aizen",Island="HuecoMundo"},
     {Name="AlucardBoss",Display="Alucard",Island="Sailor"},
@@ -52,7 +54,7 @@ local Hub,Notify,Win,CfgMgr,FarmToggle
 local Running=true
 local CurIsland,CurTarget=nil,nil
 local Conns={}
-local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant,LastQuestBusy=0,0,0,0,0,0,0,0
+local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant=0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
 local ConfLevel=0
 local ATween,TweenOn=nil,false
@@ -62,7 +64,6 @@ local SpawnDone=false
 local LockTarget=nil
 local HoverPos=nil
 local QState="NONE"
-local QCompDet=false
 local BossFight=false
 local BossTargetName=nil
 local BossDeathTimes={}
@@ -145,7 +146,7 @@ local function MatchEnemy(name,island) if not island then return false end local
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end)
-    QState="NONE" LastQuestAccept=0 QCompDet=false LastQuestBusy=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
+    QState="NONE" LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -164,9 +165,8 @@ local function ForceTP(portal)
     LastTP=tick() TPCount=1
     return ok
 end
-local function QuestAccept(island) if not island then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" QCompDet=false end
-local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" QCompDet=false end
-local function QuestScanComplete() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("quest completed") or t:find("quest complete") then return true end end end return false end
+local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
+local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" end
 local function QuestScanBusy() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("finish your current") or t:find("already have a quest") then return true end end end return false end
 local function ClickYes()
     local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
@@ -181,6 +181,12 @@ local function ClickYes()
         end
     end
 end
+local function PlayerHasChest(name)
+    for _,v in ipairs(LP:GetDescendants()) do if v.Name==name and(v:IsA("IntValue") or v:IsA("NumberValue")) and(v.Value or 0)>0 then return true end end
+    if LP.Backpack:FindFirstChild(name) then return true end
+    local c=LP.Character if c and c:FindFirstChild(name) then return true end
+    return false
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
     if tick()-LastChest<3 then return end
@@ -189,12 +195,14 @@ local function OpenAllChests()
     pcall(function() useItem=WalkPathWait(RS,2,unpack(USE_ITEM_PATH)) end)
     if not useItem then return end
     for _,name in ipairs(ChestNames) do
-        pcall(function() useItem:FireServer("Use",name,1,false) end)
-        task.wait(0.3)
-        ClickYes()
-        task.wait(0.3)
-        ClickYes()
-        task.wait(0.2)
+        if PlayerHasChest(name) then
+            pcall(function() useItem:FireServer("Use",name,1,false) end)
+            task.wait(0.3)
+            ClickYes()
+            task.wait(0.3)
+            ClickYes()
+            task.wait(0.2)
+        end
     end
 end
 local function BuyMerchantItems()
@@ -524,7 +532,7 @@ end))
 local function ExitBossMode(lastBossName)
     local bi=lastBossName and GetBossIsland(lastBossName)
     BossFight=false BossTargetName=nil BossTPDone=false BossCurrentIsland=nil ClearTgt() HoverPos=nil LastBossTP=0
-    QCompDet=false LastEnemy=0 LastQuestBusy=0
+    LastEnemy=0
     local farmIsland=GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         CurIsland=farmIsland IslandTPd=true SpawnDone=true LastEnemy=tick()
@@ -538,8 +546,8 @@ end
 local function DoFarmTick()
     local tgtIsland=GetFarmIsland() if not tgtIsland then return end
     if not CurIsland or CurIsland.Portal~=tgtIsland.Portal then
-        if CurIsland then StopTw() QuestAbandon() task.wait(0.15) end
-        CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=0 QCompDet=false
+        StopTw() QuestAbandon() task.wait(0.15)
+        CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=0
         Notify.new({Title="-> "..tgtIsland.Portal,Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
     end
     if not IslandTPd then
@@ -554,7 +562,7 @@ local function DoFarmTick()
     end
     if F.AutoQuest then
         if QState=="NONE" then if tick()-LastQuestAccept>30 then QuestAccept(CurIsland) end
-        elseif QState=="ACTIVE" then if QCompDet then QState="COOLDOWN" QCompDet=false task.wait(0.5) QState="NONE" QuestAccept(CurIsland) end end
+        elseif QState=="ACTIVE" then if tick()-LastQuestAccept>60 then QState="NONE" end end
     end
     local enemies=FindEnemies(CurIsland)
     if #enemies>0 then
@@ -569,7 +577,7 @@ local function DoFarmTick()
         if CurTarget then TweenTo(CurTarget) Attack(CurTarget) end
     else
         CurTarget=nil LockTarget=nil
-        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false LastEnemy=0 QCompDet=false HoverPos=nil end
+        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false LastEnemy=0 HoverPos=nil end
         task.wait(0.15)
     end
     if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
@@ -660,12 +668,20 @@ local function DoBossTick()
     Attack(model)
     if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
 end
+local function DisableGameAutoSkills()
+    pcall(function()
+        local r=WalkPathWait(RS,3,unpack(SETTINGS_TOGGLE_PATH))
+        if not r then return end
+        for _,skill in ipairs({"AutoSkillZ","AutoSkillX","AutoSkillC","AutoSkillV","AutoSkillF"}) do
+            pcall(function() r:FireServer(skill,false) end) task.wait(0.05)
+        end
+    end)
+end
 Hub=loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))()
 Notify=Hub.newNotify()
 CfgMgr=Hub:ConfigManager({Directory="pimpleHUB",Config="Pimple-Configs"})
 Hub.Colors.Highlight=Color3.fromRGB(220,60,60)
 Hub.Colors.Toggle=Color3.fromRGB(220,60,60)
-Hub.Colors.StrokeColor=DarkenColor(Hub.Colors.Toggle)
 Hub:Loader(ICON,2).yield()
 Win=Hub.new({Name="PIMPLE v7.5",Keybind="LeftAlt",Logo=ICON,TextSize=18,Font=Enum.Font.GothamBold})
 Win.OnToggle=function() end
@@ -700,7 +716,7 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
 local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
-for _,isl in ipairs(Islands) do TpSec:AddButton({Name=isl.Portal,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(isl.Portal) Notify.new({Title="TP -> "..isl.Portal,Content="Teleporting...",Duration=2,Icon=ICON}) end}) end
+for _,name in ipairs(TpIslands) do TpSec:AddButton({Name=name,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(name) Notify.new({Title="TP -> "..name,Content="Teleporting...",Duration=2,Icon=ICON}) end}) end
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
 BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
@@ -724,13 +740,22 @@ local SetTab=Win:DrawTab({Name="Settings",Icon="settings-3",Type="Single",Enable
 local ThTab=Win:DrawTab({Name="Themes",Icon="paintbrush",Type="Single"})
 local UISec=SetTab:DrawSection({Name="UI Settings",Position="left"})
 UISec:AddToggle({Name="Always Show Frame",Default=false,Callback=function(v) Win.AlwayShowTab=v end})
-UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v Hub.Colors.StrokeColor=DarkenColor(v) RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
-UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v Hub.Colors.StrokeColor=DarkenColor(v) RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Drop Color",Default=Hub.Colors.DropColor,Callback=function(v) Hub.Colors.DropColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Block Color",Default=Hub.Colors.BlockColor,Callback=function(v) Hub.Colors.BlockColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Background Color",Default=Hub.Colors.BGDBColor,Callback=function(v) Hub.Colors.BGDBColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Stroke Color",Default=Hub.Colors.StrokeColor,Callback=function(v) Hub.Colors.StrokeColor=v Hub:RefreshCurrentColor() end})
 UISec:AddButton({Name="Copy Discord",Callback=function() pcall(function() setclipboard(DISCORD) end) Notify.new({Title="Copied",Content="Discord link copied!",Duration=2,Icon=ICON}) end})
+UISec:AddButton({Name="Destroy GUI",Callback=function()
+    Running=false
+    pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
+    for _,c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
+    task.delay(0.15,function()
+        pcall(function() Win:Destroy() end)
+        pcall(function() for _,g in ipairs(LP.PlayerGui:GetChildren()) do if g.Name:lower():find("pimple") or g.Name:lower():find("hub") then g:Destroy() end end end)
+    end)
+end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
 InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nGojo: renders via Yuji's cached position\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
 local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
@@ -755,7 +780,8 @@ task.defer(function()
 end)
 Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
 SetupAntiAFK()
-task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and not BossFight then if QuestScanBusy() then if QState=="NONE" then QState="ACTIVE" end QCompDet=false LastQuestBusy=tick() elseif QState=="ACTIVE" and QuestScanComplete() and tick()-LastQuestBusy>30 then QCompDet=true end end task.wait(0.1) end end)
+task.spawn(DisableGameAutoSkills)
+task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and not BossFight then if QuestScanBusy() then QState="ACTIVE" LastQuestAccept=tick() end end task.wait(0.5) end end)
 task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
 task.spawn(function()
     while Running do
