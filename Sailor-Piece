@@ -20,6 +20,7 @@ local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
 local SETTINGS_TOGGLE_PATH={"RemoteEvents","SettingsToggle"}
 local QUEST_REPEAT_PATH={"RemoteEvents","QuestRepeat"}
 local SUMMON_BOSS_PATH={"Remotes","RequestSummonBoss"}
+local ANOS_BOSS_PATH={"Remotes","RequestSpawnAnosBoss"}
 local BOSS_ISLAND_PORTAL="Boss"
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
@@ -51,6 +52,7 @@ local SummonBosses={
     {Name="IchigoBoss",Display="Ichigo"},
     {Name="GilgameshBoss",Display="Gilgamesh",Difficulties={"Normal","Medium","Hard","Extreme"}},
     {Name="BlessedMaidenBoss",Display="Blessed Maiden",Difficulties={"Normal","Medium","Hard","Extreme"}},
+    {Name="AnosBoss",Display="Anos",Island="Academy",Difficulties={"Normal","Medium","Hard","Extreme"}},
 }
 local IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 local ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
@@ -58,7 +60,7 @@ local MerchantItems={"Boss Key","Clan Reroll","Dungeon Key","Haki Color Reroll",
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AnosDiff="Normal",AutoChest=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
 local BSF={}
@@ -101,6 +103,8 @@ local SummonBossTarget=nil
 local SummonBossTPDone=false
 local LastSummonBossTP=0
 local SummonBossCommitted={}
+local SummonBossCurrentIsland=nil
+local SummonBossOrder=0
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
@@ -200,7 +204,7 @@ local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     AbandonAllQuests()
     LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -414,8 +418,7 @@ local function AllBossesOnIsland(island)
         if m:IsA("Model") then
             local hm=GetHum(m)
             if hm and hm.Health>0 then
-                if AllBossNames[m.Name] and BF[m.Name] and BossIsland[m.Name]==island then table.insert(out,m.Name)
-                elseif IsAnosModel(m.Name) and F.AnosEnabled and island==ANOS_ISLAND then table.insert(out,m.Name) end
+                if AllBossNames[m.Name] and BF[m.Name] and BossIsland[m.Name]==island then table.insert(out,m.Name) end
             end
         end
     end
@@ -440,8 +443,7 @@ local function PickNextBossName()
         if m:IsA("Model") then
             local hm=GetHum(m)
             if hm and hm.Health>0 then
-                if AllBossNames[m.Name] and BF[m.Name] then table.insert(alive,m.Name)
-                elseif IsAnosModel(m.Name) and F.AnosEnabled then table.insert(alive,m.Name) end
+                if AllBossNames[m.Name] and BF[m.Name] then table.insert(alive,m.Name) end
             end
         end
     end
@@ -486,8 +488,6 @@ local function ScanAllBossTimers()
     end
     local pg=LP:FindFirstChild("PlayerGui")
     if pg then for _,desc in ipairs(pg:GetDescendants()) do if desc:IsA("TextLabel") then local txt=desc.Text or "" for _,bDef in ipairs(Bosses) do if not results[bDef.Name] then if txt:find(bDef.Display) then local mn,sc=txt:match("(%d+):(%d+)") if mn and sc then results[bDef.Name]={m=tonumber(mn),s=tonumber(sc)} end end end end end end end
-    local anosModel=FindAnyAnosAlive()
-    if anosModel then results["Anos"]={alive=true,modelName=anosModel.Name} end
     for k,v in pairs(results) do BossTimerCache[k]=v BossTimerCache[k].t=tick() end
     return results
 end
@@ -502,13 +502,6 @@ local function GetBossTimerText()
             else status="Loading..." end
         else local dt=BossDeathTimes[bDef.Name] if dt then local remain=math.max(0,300-(tick()-dt)) if remain>0 then local mn=math.floor(remain/60) local sc=math.floor(remain%60) status=mn..":"..string.format("%02d",sc) else status="Ready!" end else status="Loading..." end end
         table.insert(lines,bDef.Display.." ("..bDef.Island..") - "..status)
-    end
-    local anosInfo=BossTimerCache["Anos"]
-    if anosInfo and anosInfo.alive and(tick()-(anosInfo.t or 0))<5 then
-        local diff=anosInfo.modelName and anosInfo.modelName:match("AnosBoss_(.+)") or "?"
-        table.insert(lines,"Anos "..diff.." ("..ANOS_ISLAND..") - ALIVE")
-    elseif F.AnosEnabled then
-        table.insert(lines,"Anos ("..ANOS_ISLAND..") - Not Spawned")
     end
     return table.concat(lines,"\n")
 end
@@ -811,18 +804,36 @@ end
 local function GetSummonBossDiff(name)
     if name=="GilgameshBoss" then return F.GilgameshDiff end
     if name=="BlessedMaidenBoss" then return F.BlessedMaidenDiff end
+    if name=="AnosBoss" then return F.AnosDiff end
     return nil
 end
 local function FireSummonBoss(name)
-    local diff=GetSummonBossDiff(name)
+    if not BSF[name] then return end
     pcall(function()
-        local r=WalkPathWait(RS,2,unpack(SUMMON_BOSS_PATH))
-        if not r then return end
-        if diff then r:FireServer(name,diff) else r:FireServer(name) end
+        if name=="AnosBoss" then
+            local r=WalkPathWait(RS,2,unpack(ANOS_BOSS_PATH))
+            if not r then return end
+            local diff=GetSummonBossDiff(name) or "Normal"
+            r:FireServer("Anos",diff)
+        else
+            local r=WalkPathWait(RS,2,unpack(SUMMON_BOSS_PATH))
+            if not r then return end
+            local diff=GetSummonBossDiff(name)
+            if diff then r:FireServer(name,diff) else r:FireServer(name) end
+        end
     end)
 end
+local SummonBossIslandMap={}
+for _,b in ipairs(SummonBosses) do SummonBossIslandMap[b.Name]=b.Island or BOSS_ISLAND_PORTAL end
+local function GetSummonBossIsland(name) return SummonBossIslandMap[name] or BOSS_ISLAND_PORTAL end
 local function CheckSummonBoss(name)
     local nf=GetNPCFolder() if not nf then return nil end
+    if name=="AnosBoss" then
+        for _,m in ipairs(nf:GetChildren()) do
+            if m:IsA("Model") and IsAnosModel(m.Name) then local hm=GetHum(m) if hm and hm.Health>0 then return m end end
+        end
+        return nil
+    end
     for _,m in ipairs(nf:GetChildren()) do
         if m:IsA("Model") and m.Name==name then local hm=GetHum(m) if hm and hm.Health>0 then return m end end
     end
@@ -832,23 +843,8 @@ local function HasAnySummonBossEnabled()
     for _,b in ipairs(SummonBosses) do if BSF[b.Name] then return true end end
     return false
 end
-local function PickNextSummonBoss()
-    local hrp=PlayerHRP()
-    local bestName,bestDist=nil,math.huge
-    for _,b in ipairs(SummonBosses) do
-        local m=CheckSummonBoss(b.Name)
-        if m then
-            SummonBossCommitted[b.Name]=true
-            if not hrp then return b.Name end
-            local p=ModelPos(m)
-            local d=p and (hrp.Position-p).Magnitude or math.huge
-            if d<bestDist then bestDist=d bestName=b.Name end
-        end
-    end
-    return bestName
-end
 local function ExitSummonBossMode()
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0
     ClearTgt() HoverPos=nil
 end
 local function SummonBossPosValid(model)
@@ -875,54 +871,163 @@ local function AcquireSummonBossFast(preferredName,timeout)
     return nil,nil
 end
 local function DoSummonBossTick()
+    -- Determine which bosses are enabled and what islands they need
+    local function GetNeededIslands()
+        local islands={}
+        for _,b in ipairs(SummonBosses) do
+            if BSF[b.Name] or SummonBossCommitted[b.Name] then
+                local isl=GetSummonBossIsland(b.Name)
+                islands[isl]=true
+            end
+        end
+        return islands
+    end
+    -- Pick based on FIFO commit order, fallback to nearest alive
+    local function PickBestTarget()
+        local bestName,bestOrder=nil,math.huge
+        local hrp=PlayerHRP()
+        for _,b in ipairs(SummonBosses) do
+            if SummonBossCommitted[b.Name] then
+                local m=CheckSummonBoss(b.Name)
+                if m and SummonBossPosValid(m) then
+                    local ord=SummonBossCommitted[b.Name]
+                    if type(ord)=="number" and ord<bestOrder then bestOrder=ord bestName=b.Name end
+                end
+            end
+        end
+        if bestName then return bestName end
+        -- Fallback: nearest alive committed/enabled
+        local bestDist=math.huge
+        for _,b in ipairs(SummonBosses) do
+            if BSF[b.Name] or SummonBossCommitted[b.Name] then
+                local m=CheckSummonBoss(b.Name)
+                if m and SummonBossPosValid(m) then
+                    if not hrp then return b.Name end
+                    local p=ModelPos(m)
+                    local d=p and (hrp.Position-p).Magnitude or math.huge
+                    if d<bestDist then bestDist=d bestName=b.Name end
+                end
+            end
+        end
+        return bestName
+    end
+    -- Summon enabled bosses on the current island that haven't been summoned yet
+    local function SummonAllEnabled()
+        for _,b in ipairs(SummonBosses) do
+            if BSF[b.Name] and not SummonBossCommitted[b.Name] and GetSummonBossIsland(b.Name)==SummonBossCurrentIsland then
+                FireSummonBoss(b.Name)
+                SummonBossOrder=SummonBossOrder+1
+                SummonBossCommitted[b.Name]=SummonBossOrder
+                task.wait(0.1)
+            end
+        end
+    end
+    -- Phase 1: TP to island if needed
     if not SummonBossTPDone then
         if tick()-LastSummonBossTP<4 then task.wait(0.2) return end
-        LastSummonBossTP=tick()
-        Notify.new({Title="Summon Boss",Content="Teleporting to Boss Island",Duration=2,Icon=ICON})
-        StopTw() HoverPos=nil ClearTgt()
-        ForceTP(BOSS_ISLAND_PORTAL)
-        task.wait(0.9)
-        local _hrp=PlayerHRP() if _hrp then HoverPos=_hrp.Position end
+        -- Figure out first island to go to: prioritize island of earliest committed boss, or Boss island
+        local targetIsland=BOSS_ISLAND_PORTAL
+        local bestOrd=math.huge
         for _,b in ipairs(SummonBosses) do
-            if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
+            if BSF[b.Name] then
+                local isl=GetSummonBossIsland(b.Name)
+                local ord=SummonBossCommitted[b.Name]
+                if type(ord)=="number" and ord<bestOrd then bestOrd=ord targetIsland=isl end
+            end
         end
+        -- If no committed yet, go to Boss island first (most bosses are there)
+        if bestOrd==math.huge then
+            local hasBossIsland,hasOther=false,false
+            for _,b in ipairs(SummonBosses) do
+                if BSF[b.Name] then
+                    if GetSummonBossIsland(b.Name)==BOSS_ISLAND_PORTAL then hasBossIsland=true
+                    else hasOther=true end
+                end
+            end
+            if hasBossIsland then targetIsland=BOSS_ISLAND_PORTAL
+            elseif hasOther then
+                for _,b in ipairs(SummonBosses) do
+                    if BSF[b.Name] then targetIsland=GetSummonBossIsland(b.Name) break end
+                end
+            end
+        end
+        LastSummonBossTP=tick()
+        local displayIsland=PortalDisplayName(targetIsland)
+        Notify.new({Title="Summon Boss",Content="Teleporting to "..displayIsland,Duration=2,Icon=ICON})
+        StopTw() HoverPos=nil ClearTgt()
+        local _hrpBefore=PlayerHRP()
+        local posBefore=_hrpBefore and _hrpBefore.Position
+        ForceTP(targetIsland)
+        task.wait(0.9)
+        -- Verify TP worked; retry once if position barely changed
+        local _hrpAfter=PlayerHRP()
+        if posBefore and _hrpAfter and (posBefore-_hrpAfter.Position).Magnitude<30 then
+            ForceTP(targetIsland)
+            task.wait(1.0)
+        end
+        SummonBossCurrentIsland=targetIsland
+        local _hrp=PlayerHRP() if _hrp then HoverPos=_hrp.Position end
+        -- Summon bosses for this island
+        SummonAllEnabled()
         local nextName,nextModel=AcquireSummonBossFast(nil,1.0)
         SummonBossTPDone=true SummonBossTarget=nextName
-        if nextModel then
-            CurTarget=nextModel
-        end
+        if nextModel then CurTarget=nextModel end
         return
     end
+    -- Phase 2: find a target
     if not SummonBossTarget then
-        SummonBossTarget=PickNextSummonBoss()
+        SummonBossTarget=PickBestTarget()
         if not SummonBossTarget then
+            -- Clear committed for current-island bosses not alive so they can be re-summoned
             for _,b in ipairs(SummonBosses) do
-                if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
+                if SummonBossCommitted[b.Name] and GetSummonBossIsland(b.Name)==SummonBossCurrentIsland and not CheckSummonBoss(b.Name) then
+                    SummonBossCommitted[b.Name]=nil
+                end
             end
-            local nextName=AcquireSummonBossFast(nil,1.0)
+            SummonAllEnabled()
+            local nextName,_=AcquireSummonBossFast(nil,1.0)
             SummonBossTarget=nextName
-            if not SummonBossTarget then task.wait(0.1) end
+            if not SummonBossTarget then
+                -- Check if there are enabled bosses on another island we should visit
+                for _,b in ipairs(SummonBosses) do
+                    if BSF[b.Name] and GetSummonBossIsland(b.Name)~=SummonBossCurrentIsland then
+                        SummonBossTPDone=false LastSummonBossTP=0
+                        ClearTgt()
+                        return
+                    end
+                end
+                task.wait(0.1)
+            end
             return
         end
         Notify.new({Title="Summon Boss: "..(SummonBossDisplay[SummonBossTarget] or SummonBossTarget),Content="Attacking!",Duration=2,Icon=ICON})
     end
+    -- Phase 3: check if target needs island switch
+    local targetIsland=GetSummonBossIsland(SummonBossTarget)
+    if targetIsland~=SummonBossCurrentIsland then
+        SummonBossTPDone=false LastSummonBossTP=0
+        ClearTgt()
+        return
+    end
+    -- Phase 4: fight
     local model=CheckSummonBoss(SummonBossTarget)
     if not model then
-        -- Brief recheck to avoid false death from lag (same boss only, never switch)
         task.wait(0.25)
         model=CheckSummonBoss(SummonBossTarget)
         if model then CurTarget=model return end
-        -- Truly dead — attribute kill with the CORRECT target name
         local deadName=SummonBossTarget
         local deadDisplay=SummonBossDisplay[deadName] or deadName
         BossKills=BossKills+1 Kills=Kills+1
         Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
         SummonBossTarget=nil ClearTgt()
-        -- Keep HoverPos so player stays at last good position (don't nil it)
-        -- Re-summon if enabled
-        if BSF[deadName] then FireSummonBoss(deadName) SummonBossCommitted[deadName]=true end
-        -- Poll for new boss (position-validated)
+        -- Re-summon the killed boss if still enabled
+        if BSF[deadName] and GetSummonBossIsland(deadName)==SummonBossCurrentIsland then
+            task.wait(0.3)
+            FireSummonBoss(deadName)
+            SummonBossOrder=SummonBossOrder+1
+            SummonBossCommitted[deadName]=SummonBossOrder
+        end
         local nextName,nextModel=AcquireSummonBossFast(deadName,1.5)
         SummonBossTarget=nextName
         if nextModel then CurTarget=nextModel end
@@ -930,7 +1035,6 @@ local function DoSummonBossTick()
     end
     local bossPos=ModelPos(model)
     if not bossPos or bossPos.Y<-30 then task.wait(0.15) return end
-    -- If boss is unreasonably far, re-teleport to boss island instead of tweening to garbage
     local _hrp=PlayerHRP()
     if _hrp and (bossPos-_hrp.Position).Magnitude>600 then
         SummonBossTPDone=false LastSummonBossTP=0
@@ -999,20 +1103,23 @@ for _,name in ipairs(TpIslands) do
     end})
 end
 local BSec=FTab:DrawSection({Name="Auto Farm Boss",Position="right"})
-BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="Timer-based world bosses below"})
+BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight then FullReset() end end}).Link:AddHelper({Text="Timer-based world bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
-BSec:AddToggle({Name="Anos (Academy)",Flag="AnosEnabled",Default=false,Callback=function(v) F.AnosEnabled=v if not v and BossFight and BossTargetName and IsAnosModel(BossTargetName) then FullReset() end end}).Link:AddHelper({Text="Any difficulty, auto detect"})
 BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
 task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
 local BSummonSec=FTab:DrawSection({Name="Auto Summon Boss",Position="right"})
-BSummonSec:AddToggle({Name="Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then ExitSummonBossMode() end end}).Link:AddHelper({Text="Boss Island summons — priority over farm & timer bosses"})
+BSummonSec:AddToggle({Name="Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then ExitSummonBossMode() end end}).Link:AddHelper({Text="Summon bosses — priority over farm & timer bosses"})
+local SummonDiffKeys={GilgameshBoss="GilgameshDiff",BlessedMaidenBoss="BlessedMaidenDiff",AnosBoss="AnosDiff"}
 for _,bDef in ipairs(SummonBosses) do
-    local flagName="SummonBoss_"..bDef.Name
-    BSummonSec:AddToggle({Name=bDef.Display,Flag=flagName,Default=false,Callback=function(v) BSF[bDef.Name]=v end})
+    local bossName=bDef.Name
+    local bossDisplay=bDef.Display
+    local flagName="SummonBoss_"..bossName
+    local islLabel=bDef.Island and " ("..PortalDisplayName(bDef.Island)..")" or ""
+    BSummonSec:AddToggle({Name=bossDisplay..islLabel,Flag=flagName,Default=false,Callback=function(v) BSF[bossName]=v end})
     if bDef.Difficulties then
-        local diffFlag="Diff_"..bDef.Name
-        local diffKey=bDef.Name=="GilgameshBoss" and "GilgameshDiff" or "BlessedMaidenDiff"
-        BSummonSec:AddDropdown({Name=bDef.Display.." Difficulty",Default="Normal",Values=bDef.Difficulties,Flag=diffFlag,Callback=function(v) F[diffKey]=v end}).Link:AddHelper({Text="Normal/Medium/Hard/Extreme"})
+        local diffFlag="Diff_"..bossName
+        local diffKey=SummonDiffKeys[bossName]
+        BSummonSec:AddDropdown({Name=bossDisplay.." Difficulty",Default="Normal",Values=bDef.Difficulties,Flag=diffFlag,Callback=function(v) F[diffKey]=v end}).Link:AddHelper({Text="Normal/Medium/Hard/Extreme"})
     end
 end
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
@@ -1087,12 +1194,12 @@ task.spawn(function()
             if not IsAlive() then task.wait(0.3) break end
             if not isSummonActive and SummonBossFight then ExitSummonBossMode() end
             if isSummonActive and not SummonBossFight then
-                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
-                Notify.new({Title="Summon Boss Mode",Content="Heading to Boss Island",Duration=3,Icon=ICON})
+                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 SummonBossCurrentIsland=nil SummonBossOrder=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                Notify.new({Title="Summon Boss Mode",Content="Starting summon boss cycle",Duration=3,Icon=ICON})
             end
             if SummonBossFight then DoSummonBossTick() task.wait(0.1) break end
             if not F.AutoFarmLevel then task.wait(0.3) break end
-            if(F.BossEnabled or F.AnosEnabled) and not BossFight then
+            if F.BossEnabled and not BossFight then
                 local nextName=PickNextBossName()
                 if nextName then
                     BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 BossCurrentIsland=GetBossIsland(nextName) ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
