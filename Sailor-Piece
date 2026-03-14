@@ -222,19 +222,8 @@ local function SafeInvoke(remote,timeout,...)
     while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
     return ok,result
 end
-local function HasChestInInventory(name)
-    local lo=name:lower()
-    local bp=LP:FindFirstChild("Backpack")
-    if bp then for _,t in ipairs(bp:GetChildren()) do if t.Name:lower()==lo then return true end end end
-    local char=LP.Character
-    if char then for _,t in ipairs(char:GetChildren()) do if t:IsA("Tool") and t.Name:lower()==lo then return true end end end
-    return false
-end
 local function OpenAllChests()
     if not F.AutoChest then return end
-    local anyInInventory=false
-    for _,name in ipairs(ChestNames) do if HasChestInInventory(name) then anyInInventory=true break end end
-    if not anyInInventory then return end
     if tick()-LastChest<5 then return end
     LastChest=tick()
     local useItem
@@ -242,18 +231,16 @@ local function OpenAllChests()
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        if HasChestInInventory(name) then
-            if isEvent then
-                pcall(function() useItem:FireServer("Use",name,999,false) end)
-            else
-                SafeInvoke(useItem,3,"Use",name,999,false)
-            end
-            task.wait(0.15)
-            ClickYes()
-            task.wait(0.15)
-            ClickYes()
-            task.wait(0.1)
+        if isEvent then
+            pcall(function() useItem:FireServer("Use",name,999,false) end)
+        else
+            SafeInvoke(useItem,3,"Use",name,999,false)
         end
+        task.wait(0.15)
+        ClickYes()
+        task.wait(0.15)
+        ClickYes()
+        task.wait(0.1)
     end
 end
 local function BuyMerchantItems()
@@ -265,25 +252,14 @@ local function BuyMerchantItems()
     if not remote then return end
     for _,item in ipairs(MerchantItems) do
         if FM[item] then
-            local bought=0
-            local lastResult
             for _=1,15 do
                 local ok,result=SafeInvoke(remote,3,item,1)
                 if not ok or result==false or result==nil then break end
                 if type(result)=="table" and result.success==false then break end
-                bought=bought+1
-                lastResult=result
-                task.wait(0.1)
-            end
-            if bought>0 and F.MerchNotify then
-                local info="Purchased x"..bought.." "..item
-                if type(lastResult)=="table" then
-                    if lastResult.stock~=nil then info=info.." | Remaining stock: "..tostring(lastResult.stock) end
-                    if lastResult.price~=nil then info=info.." | Price/ea: "..tostring(lastResult.price) end
-                elseif type(lastResult)=="number" then
-                    info=info.." | Remaining stock: "..tostring(lastResult)
+                if F.MerchNotify then
+                    Notify.new({Title="Auto Merchant",Content="Purchased "..item,Duration=4,Icon=ICON})
                 end
-                Notify.new({Title="Auto Merchant",Content=info,Duration=4,Icon=ICON})
+                task.wait(0.1)
             end
         end
     end
