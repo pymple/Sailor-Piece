@@ -1,3 +1,4 @@
+
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
@@ -14,6 +15,12 @@ local QUEST_ABANDON_PATH={"RemoteEvents","QuestAbandon"}
 local USE_ITEM_PATH={"Remotes","UseItem"}
 local COMBAT_HIT_PATH={"CombatSystem","Remotes","RequestHit"}
 local ABILITY_PATH={"AbilitySystem","Remotes","RequestAbility"}
+local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
+local SETTINGS_TOGGLE_PATH={"RemoteEvents","SettingsToggle"}
+local QUEST_REPEAT_PATH={"RemoteEvents","QuestRepeat"}
+local SUMMON_BOSS_PATH={"Remotes","RequestSummonBoss"}
+local AUTO_SPAWN_BOSS_PATH={"Remotes","RequestAutoSpawn"}
+local BOSS_ISLAND_PORTAL="Boss"
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
     {Portal="Jungle",FarmUntil=750,Enemies={"Monkey"},QuestNPC="QuestNPC3"},
@@ -26,39 +33,60 @@ local Islands={
     {Portal="Academy",FarmUntil=10000,Enemies={"AcademyTeacher"},QuestNPC="QuestNPC15"},
     {Portal="Judgement",FarmUntil=999999,Enemies={"Swordsman"},QuestNPC="QuestNPC16"},
 }
+local TpIslands={"Starter","Jungle","Desert","Snow","Sailor","Shibuya","HuecoMundo","Boss","Dungeon","Shinjuku","Slime","Academy","Judgement"}
+local PortalDisplayNames={HuecoMundo="Hueco Mundo"}
+local function PortalDisplayName(p) return PortalDisplayNames[p] or p end
 local Bosses={
-    {Name="SukunaBoss",Display="Sukuna",Island="Shibuya"},
-    {Name="YujiBoss",Display="Yuji",Island="Shibuya"},
-    {Name="GojoBoss",Display="Gojo",Island="Shibuya",RenderNear="YujiBoss"},
     {Name="AizenBoss",Display="Aizen",Island="HuecoMundo"},
     {Name="AlucardBoss",Display="Alucard",Island="Sailor"},
+    {Name="GojoBoss",Display="Gojo",Island="Shibuya",RenderNear="YujiBoss"},
     {Name="JinwooBoss",Display="Jinwoo",Island="Sailor"},
+    {Name="SukunaBoss",Display="Sukuna",Island="Shibuya"},
     {Name="YamatoBoss",Display="Yamato",Island="Judgement"},
+    {Name="YujiBoss",Display="Yuji",Island="Shibuya"},
+}
+local SummonBosses={
+    {Name="SaberBoss",Display="Saber"},
+    {Name="QinShiBoss",Display="Qin Shi"},
+    {Name="IchigoBoss",Display="Ichigo"},
+    {Name="GilgameshBoss",Display="Gilgamesh",Difficulties={"Normal","Medium","Hard","Extreme"}},
+    {Name="BlessedMaidenBoss",Display="Blessed Maiden",Difficulties={"Normal","Medium","Hard","Extreme"}},
 }
 local IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 local ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
+local MerchantItems={"Boss Key","Clan Reroll","Dungeon Key","Haki Color Reroll","Race Reroll","Rush Key","Trait Reroll"}
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
+local BSF={}
+for _,b in ipairs(SummonBosses) do BSF[b.Name]=false end
+local SummonBossDisplay={}
+for _,b in ipairs(SummonBosses) do SummonBossDisplay[b.Name]=b.Display end
+local FM={}
+for _,item in ipairs(MerchantItems) do FM[item]=false end
 local Kills,BossKills=0,0
 local Hub,Notify,Win,CfgMgr,FarmToggle
 local Running=true
 local CurIsland,CurTarget=nil,nil
 local Conns={}
-local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept=0,0,0,0,0,0
+local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant,LastCanCollide=0,0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
-local ConfLevel=0
-local ATween,TweenOn=nil,false
+local ConfLevel,LastLevelScanTick=0,0
+local ATween,ATweenConn,TweenOn=nil,nil,false
 local TweenTarget=nil
+local HumCache=setmetatable({},{__mode="k"})
+local CharHum=nil
+local CachedQuestAbandon=nil
+local CachedUseItem=nil
+local LOOK_DOWN=Vector3.new(0,-1,0)
 local IslandTPd=false
 local SpawnDone=false
 local LockTarget=nil
 local HoverPos=nil
 local QState="NONE"
-local QCompDet=false
 local BossFight=false
 local BossTargetName=nil
 local BossDeathTimes={}
@@ -68,17 +96,33 @@ local BossTPDone=false
 local LastBossTP=0
 local BossCurrentIsland=nil
 local BossPosCache={}
+local SummonBossFight=false
+local SummonBossTarget=nil
+local SummonBossTPDone=false
+local LastSummonBossTP=0
+local SummonAutoSpawnFired={}
+local SummonBossCommitted={}
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
-local function StopTw() if ATween then pcall(function() ATween:Cancel() end) ATween=nil end TweenOn=false TweenTarget=nil end
+local function StopTw() if ATweenConn then pcall(function() ATweenConn:Disconnect() end) ATweenConn=nil end if ATween then pcall(function() ATween:Cancel() end) ATween=nil end TweenOn=false TweenTarget=nil end
+local function DarkenColor(c,f) f=f or 0.55 return Color3.new(math.max(0,c.R*f),math.max(0,c.G*f),math.max(0,c.B*f)) end
+local function BrightenColor(c,f) f=f or 1.5 return Color3.new(math.min(1,c.R*f),math.min(1,c.G*f),math.min(1,c.B*f)) end
+local ButtonBorderStrokes={}
+local function RefreshButtonBorders(bc) for _,s in ipairs(ButtonBorderStrokes) do pcall(function() if s and s.Parent then s.Color=bc end end) end end
 local function ClearTgt() CurTarget=nil LockTarget=nil StopTw() end
 local function GetHum(e)
     if not e then return nil end
+    local cached=HumCache[e]
+    if cached then
+        local ok,alive=pcall(function() return cached.Parent~=nil end)
+        if ok and alive then return cached end
+        HumCache[e]=nil
+    end
     local h=e:FindFirstChildOfClass("Humanoid")
-    if h then return h end
-    for _,d in ipairs(e:GetDescendants()) do if d:IsA("Humanoid") then return d end end
-    return nil
+    if not h then for _,d in ipairs(e:GetDescendants()) do if d:IsA("Humanoid") then h=d break end end end
+    if h then HumCache[e]=h end
+    return h
 end
 local function Root(e)
     if not e then return nil end
@@ -120,7 +164,9 @@ end
 local function GetLevel()
     local lv=0
     pcall(function() local ls=LP:FindFirstChild("leaderstats") if ls then local v=ls:FindFirstChild("Level") or ls:FindFirstChild("Lvl") or ls:FindFirstChild("LVL") if v then lv=tonumber(v.Value) or 0 end end end)
-    if lv>0 then ConfLevel=lv return lv end
+    if lv>0 then ConfLevel=lv LastLevelScanTick=tick() return lv end
+    if ConfLevel>0 and tick()-LastLevelScanTick<3 then return ConfLevel end
+    LastLevelScanTick=tick()
     pcall(function() for _,c in ipairs(LP:GetDescendants()) do if(c:IsA("IntValue") or c:IsA("NumberValue") or c:IsA("StringValue"))then local n=c.Name:lower() if n=="level" or n=="lvl" then local val=tonumber(c.Value) if val and val>lv then lv=val end end end end end)
     if lv>0 then ConfLevel=lv return lv end
     pcall(function() local pg=LP:FindFirstChild("PlayerGui") if pg then for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local m=(d.Text or ""):match("Lv%.%s*(%d[%d,%.]*)" ) if m then m=m:gsub(",","") local val=tonumber(m) if val and val>lv then lv=val end end end end end end)
@@ -133,12 +179,29 @@ local function GetFarmIsland() local lvl=GetLevel() if lvl==0 then return nil en
 local function IsAlive() local c=LP.Character if not c then return false end local h=c:FindFirstChild("HumanoidRootPart") local hm=c:FindFirstChildOfClass("Humanoid") return h~=nil and hm~=nil and hm.Health>0 end
 local function WaitChar() if IsAlive() then return true end local t=tick() while tick()-t<20 do if IsAlive() then task.wait(0.5) return true end task.wait(0.15) end return false end
 local function IsPlayer(m) for _,p in ipairs(Players:GetPlayers()) do if p.Character==m then return true end end return false end
-local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end return false end
+local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end if lo:match("boss$") then return true end return false end
 local function MatchEnemy(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do if lo:find(e:lower(),1,true) then return true end end return false end
+local function AbandonAllQuests()
+    QState="NONE"
+    if not CachedQuestAbandon then
+        pcall(function()
+            local f=RS:FindFirstChild(QUEST_ABANDON_PATH[1])
+            if f then CachedQuestAbandon=f:FindFirstChild(QUEST_ABANDON_PATH[2]) end
+        end)
+        if not CachedQuestAbandon then pcall(function() CachedQuestAbandon=WalkPathWait(RS,1,unpack(QUEST_ABANDON_PATH)) end) end
+    end
+    local ab=CachedQuestAbandon
+    if ab then
+        pcall(function() ab:FireServer("repeatable") end)
+        pcall(function() ab:FireServer() end)
+        for _,isl in ipairs(Islands) do pcall(function() ab:FireServer(isl.QuestNPC) end) end
+    end
+end
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
-    pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end)
-    QState="NONE" LastQuestAccept=0 QCompDet=false BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
+    AbandonAllQuests()
+    LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={} SummonBossCommitted={}
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -157,9 +220,33 @@ local function ForceTP(portal)
     LastTP=tick() TPCount=1
     return ok
 end
-local function QuestAccept(island) if not island then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" QCompDet=false end
-local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" QCompDet=false end
-local function QuestScanComplete() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("quest completed") or t:find("quest complete") then return true end end end return false end
+local function EnableGameQuestRepeat()
+    pcall(function()
+        local r=WalkPathWait(RS,3,unpack(SETTINGS_TOGGLE_PATH))
+        if not r then return end
+        r:FireServer("EnableQuestRepeat",true)
+        task.wait(0.05)
+        r:FireServer("AutoQuestRepeat",true)
+    end)
+end
+local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" task.spawn(EnableGameQuestRepeat) end
+local function QuestRepeatFire(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_REPEAT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
+local function QuestAbandon() AbandonAllQuests() end
+local function QuestCompletionScan()
+    if QState~="ACTIVE" then return end
+    if tick()-LastQuestAccept>60 then QState="NONE" return end
+    if tick()-LastQuestAccept<8 then return end
+    local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+    local hasQuestUI=false
+    for _,d in ipairs(pg:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            local t=(d.Text or ""):lower()
+            if t:find("quest complet") or t:find("abandon") then QState="NONE" return end
+            if t:find("%d+%s*/%s*%d+") or t:find("kill") or t:find("collect") or t:find("objective") or t:find("quest") then hasQuestUI=true end
+        end
+    end
+    if not hasQuestUI and tick()-LastQuestAccept>20 then QState="NONE" end
+end
 local function ClickYes()
     local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
     for _,desc in ipairs(pg:GetDescendants()) do
@@ -173,20 +260,83 @@ local function ClickYes()
         end
     end
 end
+local function PlayerHasChest(name)
+    local found=LP:FindFirstChild(name,true)
+    if not found then return false end
+    if found:IsA("IntValue") or found:IsA("NumberValue") then return(tonumber(found.Value) or 0)>0 end
+    return true
+end
+local function SafeInvoke(remote,timeout,...)
+    local args={...}
+    local done,ok,result=false,false,nil
+    task.spawn(function()
+        local s,r=pcall(function() return remote:InvokeServer(table.unpack(args)) end)
+        ok,result,done=s,r,true
+    end)
+    local t=tick()
+    while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
+    return ok,result
+end
+local function SuppressHasItemError()
+    pcall(function()
+        local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+        for _,d in ipairs(pg:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                local txt=(d.Text or ""):lower()
+                if (txt:find("don") or txt:find("doesn")) and txt:find("have") then
+                    local p=d while p and not p:IsA("ScreenGui") do p=p.Parent end
+                    if p then pcall(function() p.Enabled=false end) end
+                    pcall(function() d.Visible=false end)
+                end
+            end
+        end
+    end)
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
-    if tick()-LastChest<3 then return end
+    if tick()-LastChest<5 then return end
     LastChest=tick()
-    local useItem
-    pcall(function() useItem=WalkPathWait(RS,2,unpack(USE_ITEM_PATH)) end)
+    if not CachedUseItem then
+        pcall(function()
+            local f=RS:FindFirstChild(USE_ITEM_PATH[1])
+            if f then CachedUseItem=f:FindFirstChild(USE_ITEM_PATH[2]) end
+        end)
+        if not CachedUseItem then pcall(function() CachedUseItem=WalkPathWait(RS,1,unpack(USE_ITEM_PATH)) end) end
+    end
+    local useItem=CachedUseItem
     if not useItem then return end
+    local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        pcall(function() useItem:FireServer("Use",name,1,false) end)
-        task.wait(0.3)
+        if isEvent then
+            pcall(function() useItem:FireServer("Use",name,999,false) end)
+        else
+            SafeInvoke(useItem,0.5,"Use",name,999,false)
+        end
+        task.wait(0.15)
+        SuppressHasItemError()
         ClickYes()
-        task.wait(0.3)
-        ClickYes()
-        task.wait(0.2)
+        task.wait(0.1)
+    end
+end
+local function BuyMerchantItems()
+    if not F.AutoMerchant then return end
+    if tick()-LastMerchant<1800 then return end
+    LastMerchant=tick()
+    local remote
+    pcall(function() remote=WalkPathWait(RS,2,unpack(MERCHANT_REMOTE_PATH)) end)
+    if not remote then return end
+    for _,item in ipairs(MerchantItems) do
+        if FM[item] then
+            for _=1,15 do
+                local ok,result=SafeInvoke(remote,0.75,item,1)
+                if not ok or result==false then break end
+                if type(result)=="table" and result.success==false then break end
+                if F.MerchNotify then
+                    Notify.new({Title="Auto Merchant",Content="Purchased "..item,Duration=4,Icon=ICON})
+                end
+                task.wait(0.05)
+            end
+        end
     end
 end
 local function SpawnCrystal(island)
@@ -211,22 +361,26 @@ local function GetNPCFolder() return workspace:FindFirstChild(NPC_FOLDER) end
 local function FindEnemies(island)
     local nf=GetNPCFolder()
     if not nf or not island then return {} end
-    local hrp=PlayerHRP() if not hrp then return {} end
     local out={}
-    for _,m in ipairs(nf:GetChildren()) do
+    local function checkModel(m)
         if m:IsA("Model") and not IsPlayer(m) and not IsBoss(m.Name) then
             local hm=GetHum(m)
             if hm and hm.Health>0 and not ShouldIgnore(m.Name) then
-                if MatchEnemy(m.Name,island) then local p=ModelPos(m) if p and(hrp.Position-p).Magnitude<400 then table.insert(out,m) end end
+                if MatchEnemy(m.Name,island) then table.insert(out,m) end
             end
         end
+    end
+    for _,child in ipairs(nf:GetChildren()) do
+        if child:IsA("Folder") then for _,m in ipairs(child:GetChildren()) do checkModel(m) end
+        else checkModel(child) end
     end
     return out
 end
 local function NearestFrom(list)
     local hrp=PlayerHRP() if not hrp then return nil end
+    local myY=hrp.Position.Y
     local best,bd=nil,math.huge
-    for _,e in ipairs(list) do local p=ModelPos(e) if p then local d=(p-hrp.Position).Magnitude if d<bd then bd=d best=e end end end
+    for _,e in ipairs(list) do local p=ModelPos(e) if p and math.abs(p.Y-myY)<150 then local d=(p-hrp.Position).Magnitude if d<bd then bd=d best=e end end end
     return best
 end
 local function FreshBoss(name) local nf=GetNPCFolder() if not nf then return nil end for _,m in ipairs(nf:GetChildren()) do if m:IsA("Model") and m.Name==name then local hm=GetHum(m) if hm and hm.Health>0 then return m end end end return nil end
@@ -320,16 +474,13 @@ local function ScanAllBossTimers()
     local results={}
     local nf=GetNPCFolder()
     if nf then
-        for _,bDef in ipairs(Bosses) do
-            for _,m in ipairs(nf:GetChildren()) do
-                if m:IsA("Model") and m.Name==bDef.Name then
-                    local hm=GetHum(m)
-                    if hm and hm.Health>0 then results[bDef.Name]={alive=true}
-                    else
-                        for _,d in ipairs(m:GetDescendants()) do if d:IsA("TextLabel") then local mn,sc=(d.Text or ""):match("(%d+):(%d+)") if mn and sc then results[bDef.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end
-                        if not results[bDef.Name] then for _,d in ipairs(m:GetDescendants()) do if d:IsA("BillboardGui") then for _,child in ipairs(d:GetDescendants()) do if child:IsA("TextLabel") then local mn,sc=(child.Text or ""):match("(%d+):(%d+)") if mn and sc then results[bDef.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end if results[bDef.Name] then break end end end end
-                    end
-                    break
+        for _,m in ipairs(nf:GetChildren()) do
+            if m:IsA("Model") and AllBossNames[m.Name] and not results[m.Name] then
+                local hm=GetHum(m)
+                if hm and hm.Health>0 then results[m.Name]={alive=true}
+                else
+                    for _,d in ipairs(m:GetDescendants()) do if d:IsA("TextLabel") then local mn,sc=(d.Text or ""):match("(%d+):(%d+)") if mn and sc then results[m.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end
+                    if not results[m.Name] then for _,d in ipairs(m:GetDescendants()) do if d:IsA("BillboardGui") then for _,child in ipairs(d:GetDescendants()) do if child:IsA("TextLabel") then local mn,sc=(child.Text or ""):match("(%d+):(%d+)") if mn and sc then results[m.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end if results[m.Name] then break end end end end
                 end
             end
         end
@@ -401,7 +552,7 @@ local function TweenTo(enemy)
     local cf=CFrame.new(goal,look or goal)
     local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
     ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
-    ATween.Completed:Connect(function() ATween=nil TweenOn=false TweenTarget=nil LockTarget=enemy HoverPos=goal end)
+    ATweenConn=ATween.Completed:Connect(function() ATween=nil ATweenConn=nil TweenOn=false TweenTarget=nil LockTarget=enemy HoverPos=goal end)
     ATween:Play()
     local t=tick()
     while TweenOn and TweenTarget==enemy and tick()-t<dur+0.5 do task.wait(0.05) end
@@ -420,7 +571,7 @@ local function TweenToPoint(goal)
     local cf=CFrame.new(goal,goal+Vector3.new(0,-1,0))
     local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
     ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
-    ATween.Completed:Connect(function() ATween=nil TweenOn=false HoverPos=goal end)
+    ATweenConn=ATween.Completed:Connect(function() ATween=nil ATweenConn=nil TweenOn=false HoverPos=goal end)
     ATween:Play()
     local t=tick()
     while TweenOn and tick()-t<dur+0.5 do task.wait(0.05) end
@@ -456,19 +607,29 @@ local function SetupAntiAFK()
     task.spawn(function() while Running do task.wait(Jit(240,30)) if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) pcall(function() keypress(0x41) task.wait(0.1) keyrelease(0x41) end) pcall(function() mousemoverel(1,0) task.wait(0.05) mousemoverel(-1,0) end) end end end)
 end
 local function OnCharAdded(char)
-    char:WaitForChild("Humanoid",10) LockTarget=nil TweenOn=false TweenTarget=nil HoverPos=nil
+    CharHum=nil
+    char:WaitForChild("Humanoid",10) CharHum=char:FindFirstChildOfClass("Humanoid")
+    LockTarget=nil TweenOn=false TweenTarget=nil HoverPos=nil
     if F.AutoEquip then task.spawn(function() task.wait(0.5) for _=1,10 do task.wait(0.3) local eq=GetTool() if eq and eq.Name:lower()~="combat" then break end EquipSword() end end) end
 end
 if LP.Character then task.spawn(function() OnCharAdded(LP.Character) end) end
 Conn(LP.CharacterAdded:Connect(OnCharAdded))
 local function GetIslandNames() local n={"Auto"} for _,i in ipairs(Islands) do table.insert(n,i.Portal) end return n end
 Conn(RunService.RenderStepped:Connect(function()
-    if not F.AutoFarmLevel then return end
+    local inBossFight=SummonBossFight or BossFight
+    if not F.AutoFarmLevel and not inBossFight then return end
     local c=LP.Character if not c then return end
     local hrp=c:FindFirstChild("HumanoidRootPart") if not hrp then return end
     if F.FarmMode=="Plank" then
-        local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=true end
-        for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
+        if CharHum then CharHum.PlatformStand=true end
+        if tick()-LastCanCollide>1 then LastCanCollide=tick() for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+    end
+    if inBossFight and not F.AutoFarmLevel then
+        if F.FarmMode=="Plank" then
+            hrp.AssemblyLinearVelocity=Vector3.zero
+            hrp.AssemblyAngularVelocity=Vector3.zero
+        end
+        return
     end
     if TweenOn then return end
     if LockTarget then
@@ -478,24 +639,26 @@ Conn(RunService.RenderStepped:Connect(function()
     end
     if LockTarget then
         local goal,look=GetGoalForEnemy(LockTarget)
-        if goal then hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal end
+        if goal then
+            if F.FarmMode=="Plank" and HoverPos then goal=Vector3.new(goal.X,HoverPos.Y,goal.Z) end
+            hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal
+        end
     elseif HoverPos then
-        hrp.CFrame=CFrame.new(HoverPos,HoverPos+Vector3.new(0,-1,0))
+        hrp.CFrame=CFrame.new(HoverPos,HoverPos+LOOK_DOWN)
     end
     if F.FarmMode=="Plank" then
-        hrp.Velocity=Vector3.zero
-        pcall(function() hrp.AssemblyLinearVelocity=Vector3.zero end)
-        pcall(function() hrp.AssemblyAngularVelocity=Vector3.zero end)
+        hrp.AssemblyLinearVelocity=Vector3.zero
+        hrp.AssemblyAngularVelocity=Vector3.zero
     end
 end))
 local function ExitBossMode(lastBossName)
     local bi=lastBossName and GetBossIsland(lastBossName)
     BossFight=false BossTargetName=nil BossTPDone=false BossCurrentIsland=nil ClearTgt() HoverPos=nil LastBossTP=0
-    QState="NONE" LastQuestAccept=0 QCompDet=false LastEnemy=0
+    LastEnemy=0
     local farmIsland=GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         CurIsland=farmIsland IslandTPd=true SpawnDone=true LastEnemy=tick()
-        if F.AutoQuest then task.delay(0.15,function() QuestAccept(CurIsland) end) end
+        if F.AutoQuest and QState~="ACTIVE" then task.delay(0.15,function() QuestAccept(CurIsland) end) end
         Notify.new({Title="Bosses Clear!",Content="Already on "..bi..", resuming farm",Duration=3,Icon=ICON})
     else
         CurIsland=nil IslandTPd=false SpawnDone=false
@@ -505,23 +668,32 @@ end
 local function DoFarmTick()
     local tgtIsland=GetFarmIsland() if not tgtIsland then return end
     if not CurIsland or CurIsland.Portal~=tgtIsland.Portal then
-        if CurIsland then StopTw() QuestAbandon() task.wait(0.15) end
-        CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=0 QCompDet=false
-        Notify.new({Title="-> "..tgtIsland.Portal,Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
+        -- Set all state atomically BEFORE any yields so concurrent FullReset() can't corrupt mid-switch state
+        StopTw()
+        CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=tick()
+        AbandonAllQuests()
+        Notify.new({Title="Teleporting to "..PortalDisplayName(tgtIsland.Portal),Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
     end
     if not IslandTPd then
         if DoTP(CurIsland.Portal) then
-            IslandTPd=true task.wait(0.8)
-            for _=1,8 do if #FindEnemies(CurIsland)>0 then break end task.wait(0.2) end
+            IslandTPd=true
+            local snapIsland=CurIsland
+            task.wait(0.8)
+            for _=1,8 do
+                if CurIsland~=snapIsland then return end
+                if #FindEnemies(CurIsland)>0 then break end
+                task.wait(0.2)
+            end
+            if CurIsland~=snapIsland then return end
             LastEnemy=tick()
             if F.AutoSpawn and not SpawnDone then SpawnCrystal(CurIsland) SpawnDone=true task.wait(0.2) end
+            if CurIsland~=snapIsland then return end
             if F.AutoQuest and QState=="NONE" then task.wait(0.1) QuestAccept(CurIsland) end
         else task.wait(1) end
         return
     end
-    if F.AutoQuest then
-        if QState=="NONE" then if tick()-LastQuestAccept>8 then QuestAccept(CurIsland) end
-        elseif QState=="ACTIVE" then if QCompDet then QState="COOLDOWN" QCompDet=false task.wait(0.5) QState="NONE" QuestAccept(CurIsland) end end
+    if F.AutoQuest and QState=="NONE" then
+        if tick()-LastQuestAccept>5 then QuestRepeatFire(CurIsland) end
     end
     local enemies=FindEnemies(CurIsland)
     if #enemies>0 then
@@ -532,11 +704,11 @@ local function DoFarmTick()
             elseif not MatchEnemy(CurTarget.Name,CurIsland) then CurTarget=nil LockTarget=nil
             else local cp=ModelPos(CurTarget) if cp and DistTo(cp)>400 then CurTarget=nil LockTarget=nil end end
         end
-        if not CurTarget then CurTarget=NearestFrom(FindEnemies(CurIsland)) end
+        if not CurTarget then CurTarget=NearestFrom(enemies) end
         if CurTarget then TweenTo(CurTarget) Attack(CurTarget) end
     else
         CurTarget=nil LockTarget=nil
-        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false QState="NONE" LastEnemy=0 QCompDet=false HoverPos=nil end
+        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false LastEnemy=0 HoverPos=nil end
         task.wait(0.15)
     end
     if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
@@ -547,7 +719,7 @@ local function DoBossTick()
         if nextName then
             BossTargetName=nextName BossTPDone=false LastBossTP=0 ClearTgt() HoverPos=nil
             BossCurrentIsland=GetBossIsland(nextName)
-            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
+            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..PortalDisplayName(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(nil) end
         return
     end
@@ -561,7 +733,7 @@ local function DoBossTick()
         end
         if tick()-LastBossTP<4 then task.wait(0.2) return end
         ClearTgt() HoverPos=nil LastBossTP=tick()
-        Notify.new({Title="TP -> "..bi,Content=GetBossDisplay(BossTargetName),Duration=2,Icon=ICON})
+        Notify.new({Title="Teleporting to "..PortalDisplayName(bi),Content=GetBossDisplay(BossTargetName),Duration=2,Icon=ICON})
         ForceTP(bi)
         task.wait(1.5)
         BossCurrentIsland=bi
@@ -598,7 +770,7 @@ local function DoBossTick()
             if nextName then
                 BossTargetName=nextName BossTPDone=false LastBossTP=0
                 BossCurrentIsland=GetBossIsland(nextName)
-                Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
+                Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..PortalDisplayName(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
             else ExitBossMode(deadName) end
         else BossTPDone=true end
         return
@@ -616,7 +788,7 @@ local function DoBossTick()
             local nextIsland=GetBossIsland(nextName)
             if nextIsland==BossCurrentIsland then BossTPDone=true
             else BossTPDone=false LastBossTP=0 BossCurrentIsland=nextIsland end
-            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(nextIsland or "?"),Duration=3,Icon=ICON})
+            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..PortalDisplayName(nextIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(deadName) end
         return
     end
@@ -626,6 +798,103 @@ local function DoBossTick()
     TweenTo(model)
     Attack(model)
     if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
+end
+local function GetSummonBossDiff(name)
+    if name=="GilgameshBoss" then return F.GilgameshDiff end
+    if name=="BlessedMaidenBoss" then return F.BlessedMaidenDiff end
+    return nil
+end
+local function FireSummonBoss(name)
+    local diff=GetSummonBossDiff(name)
+    pcall(function()
+        local r=WalkPathWait(RS,2,unpack(SUMMON_BOSS_PATH))
+        if not r then return end
+        if diff then r:FireServer(name,diff) else r:FireServer(name) end
+    end)
+end
+local function FireAutoSpawnBoss(name)
+    local diff=GetSummonBossDiff(name)
+    pcall(function()
+        local r=WalkPathWait(RS,2,unpack(AUTO_SPAWN_BOSS_PATH))
+        if not r then return end
+        if diff then r:FireServer(name,diff) else r:FireServer(name) end
+    end)
+end
+local function CheckSummonBoss(name)
+    local nf=GetNPCFolder() if not nf then return nil end
+    for _,m in ipairs(nf:GetChildren()) do
+        if m:IsA("Model") and m.Name==name then local hm=GetHum(m) if hm and hm.Health>0 then return m end end
+    end
+    return nil
+end
+local function HasAnySummonBossEnabled()
+    for _,b in ipairs(SummonBosses) do if BSF[b.Name] then return true end end
+    return false
+end
+local function PickNextSummonBoss()
+    for _,b in ipairs(SummonBosses) do
+        if BSF[b.Name] or SummonBossCommitted[b.Name] then local m=CheckSummonBoss(b.Name) if m then return b.Name end end
+    end
+    return nil
+end
+local function ExitSummonBossMode()
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={} SummonBossCommitted={}
+    ClearTgt() HoverPos=nil
+end
+local function DoSummonBossTick()
+    if not SummonBossTPDone then
+        if tick()-LastSummonBossTP<4 then task.wait(0.2) return end
+        LastSummonBossTP=tick()
+        Notify.new({Title="Summon Boss",Content="Teleporting to Boss Island",Duration=2,Icon=ICON})
+        ForceTP(BOSS_ISLAND_PORTAL)
+        task.wait(1.5)
+        for _,b in ipairs(SummonBosses) do
+            if BSF[b.Name] and not SummonAutoSpawnFired[b.Name] then
+                FireAutoSpawnBoss(b.Name) SummonAutoSpawnFired[b.Name]=true task.wait(0.1)
+            end
+        end
+        for _,b in ipairs(SummonBosses) do
+            if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
+        end
+        SummonBossTPDone=true SummonBossTarget=nil
+        return
+    end
+    if not SummonBossTarget then
+        SummonBossTarget=PickNextSummonBoss()
+        if not SummonBossTarget then
+            for _,b in ipairs(SummonBosses) do
+                if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
+            end
+            task.wait(1)
+            return
+        end
+        Notify.new({Title="Summon Boss: "..(SummonBossDisplay[SummonBossTarget] or SummonBossTarget),Content="Attacking!",Duration=2,Icon=ICON})
+    end
+    local model=CheckSummonBoss(SummonBossTarget)
+    if not model then
+        local deadName=SummonBossTarget
+        local deadDisplay=SummonBossDisplay[deadName] or deadName
+        BossKills=BossKills+1 Kills=Kills+1
+        Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
+        SummonBossCommitted[deadName]=nil
+        SummonAutoSpawnFired[deadName]=nil
+        SummonBossTPDone=false LastSummonBossTP=0
+        SummonBossTarget=nil ClearTgt() HoverPos=nil
+        return
+    end
+    CurTarget=model
+    TweenTo(model)
+    Attack(model)
+    if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
+end
+local function DisableGameAutoSkills()
+    pcall(function()
+        local r=WalkPathWait(RS,3,unpack(SETTINGS_TOGGLE_PATH))
+        if not r then return end
+        for _,skill in ipairs({"AutoSkillZ","AutoSkillX","AutoSkillC","AutoSkillV","AutoSkillF"}) do
+            pcall(function() r:FireServer(skill,false) end) task.wait(0.05)
+        end
+    end)
 end
 Hub=loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))()
 Notify=Hub.newNotify()
@@ -649,11 +918,11 @@ FarmToggle=FSec:AddToggle({Name="Auto Farm Level",Flag="AutoFarmLevel",Default=f
 FarmToggle.Link:AddKeybind({Default="V",Flag="FarmLevelKeybind",Callback=ToggleFarm})
 FarmToggle.Link:AddHelper({Text="Plank above enemies & attack"})
 FSec:AddToggle({Name="Auto Equip Sword",Flag="AutoEquip",Default=true,Callback=function(v) F.AutoEquip=v end})
-FSec:AddToggle({Name="Auto Quest",Flag="AutoQuest",Default=true,Callback=function(v) F.AutoQuest=v end})
+FSec:AddToggle({Name="Auto Quest",Flag="AutoQuest",Default=true,Callback=function(v) F.AutoQuest=v if v and F.AutoFarmLevel then task.spawn(EnableGameQuestRepeat) end end})
 FSec:AddToggle({Name="Set Spawn Crystal",Flag="AutoSpawn",Default=false,Callback=function(v) F.AutoSpawn=v SpawnDone=false end}).Link:AddHelper({Text="TP to crystal on arrival"})
 FSec:AddToggle({Name="Anti-AFK",Flag="AntiAFK",Default=true,Callback=function(v) F.AntiAFK=v end}).Link:AddHelper({Text="Prevents disconnect"})
 FSec:AddDropdown({Name="Island",Default="Auto",Values=GetIslandNames(),Flag="SelectedIsland",Callback=function(v) F.SelectedIsland=v FullReset() end})
-FSec:AddDropdown({Name="Farm Style",Default="Plank",Values={"Plank","Behind"},Flag="FarmMode",Callback=function(v) F.FarmMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Plank = hover above | Behind = stand behind"})
+FSec:AddDropdown({Name="Farm Style",Default="Plank",Values={"Plank","Behind"},Flag="FarmMode",Callback=function(v) F.FarmMode=v ClearTgt() HoverPos=nil if v~="Plank" then pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end) end end}).Link:AddHelper({Text="Plank = hover above | Behind = stand behind"})
 FSec:AddDropdown({Name="Move Mode",Default="Tween",Values={"Tween","Teleport"},Flag="MoveMode",Callback=function(v) F.MoveMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Tween = smooth | Teleport = instant"})
 FSec:AddSlider({Name="Height (Plank)",Min=5,Max=40,Default=10,Round=0,Flag="HeightOffset",Callback=function(v) F.HeightOffset=v end})
 FSec:AddSlider({Name="Behind Dist",Min=2,Max=15,Default=5,Round=0,Flag="BehindDist",Callback=function(v) F.BehindDist=v end})
@@ -662,17 +931,41 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     local isl=CurIsland or IslandForLevel(GetLevel())
     local en=FindEnemies(isl)
     local nf=GetNPCFolder() local all={}
-    if nf then local ct={} for _,m in ipairs(nf:GetChildren()) do if m:IsA("Model") then ct[m.Name]=(ct[m.Name] or 0)+1 end end for n,c in pairs(ct) do table.insert(all,n.." x"..c) end table.sort(all) end
+    if nf then local ct={} local function addModel(m) if m:IsA("Model") then ct[m.Name]=(ct[m.Name] or 0)+1 end end for _,child in ipairs(nf:GetChildren()) do if child:IsA("Folder") then for _,m in ipairs(child:GetChildren()) do addModel(m) end else addModel(child) end end for n,c in pairs(ct) do table.insert(all,n.." x"..c) end table.sort(all) end
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
-local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
-BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
+local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
+for _,name in ipairs(TpIslands) do
+    local displayName=PortalDisplayName(name)
+    TpSec:AddButton({Name=displayName,Callback=function()
+        if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end
+        ForceTP(name)
+        Notify.new({Title="Teleporting to "..displayName,Content="Successfully teleported!",Duration=4,Icon=ICON})
+    end})
+end
+local BSec=FTab:DrawSection({Name="Auto Farm Boss",Position="right"})
+BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="Timer-based world bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
 BSec:AddToggle({Name="Anos (Academy)",Flag="AnosEnabled",Default=false,Callback=function(v) F.AnosEnabled=v if not v and BossFight and BossTargetName and IsAnosModel(BossTargetName) then FullReset() end end}).Link:AddHelper({Text="Any difficulty, auto detect"})
 BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
 task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
+local BSummonSec=FTab:DrawSection({Name="Auto Summon Boss",Position="right"})
+BSummonSec:AddToggle({Name="Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then ExitSummonBossMode() end end}).Link:AddHelper({Text="Boss Island summons — priority over farm & timer bosses"})
+for _,bDef in ipairs(SummonBosses) do
+    local flagName="SummonBoss_"..bDef.Name
+    BSummonSec:AddToggle({Name=bDef.Display,Flag=flagName,Default=false,Callback=function(v) BSF[bDef.Name]=v end})
+    if bDef.Difficulties then
+        local diffFlag="Diff_"..bDef.Name
+        local diffKey=bDef.Name=="GilgameshBoss" and "GilgameshDiff" or "BlessedMaidenDiff"
+        BSummonSec:AddDropdown({Name=bDef.Display.." Difficulty",Default="Normal",Values=bDef.Difficulties,Flag=diffFlag,Callback=function(v) F[diffKey]=v SummonAutoSpawnFired[bDef.Name]=nil end}).Link:AddHelper({Text="Normal/Medium/Hard/Extreme"})
+    end
+end
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
+local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
+MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v if v then LastMerchant=0 end end}).Link:AddHelper({Text="Buys all selected items in one go; 30 min restock"})
+MSec:AddToggle({Name="Merchant Notifier",Flag="MerchNotify",Default=true,Callback=function(v) F.MerchNotify=v end}).Link:AddHelper({Text="Shows notification when items are purchased"})
+for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
 SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
 SSec:AddToggle({Name="Skill X",Flag="SkillX",Default=false,Callback=function(v) F.SkillX=v end}).Link:AddHelper({Text="Auto use"})
@@ -685,42 +978,75 @@ local SetTab=Win:DrawTab({Name="Settings",Icon="settings-3",Type="Single",Enable
 local ThTab=Win:DrawTab({Name="Themes",Icon="paintbrush",Type="Single"})
 local UISec=SetTab:DrawSection({Name="UI Settings",Position="left"})
 UISec:AddToggle({Name="Always Show Frame",Default=false,Callback=function(v) Win.AlwayShowTab=v end})
-UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v Hub:RefreshCurrentColor() end})
-UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v RefreshButtonBorders(BrightenColor(v)) Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v RefreshButtonBorders(BrightenColor(v)) Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Drop Color",Default=Hub.Colors.DropColor,Callback=function(v) Hub.Colors.DropColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Block Color",Default=Hub.Colors.BlockColor,Callback=function(v) Hub.Colors.BlockColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Background Color",Default=Hub.Colors.BGDBColor,Callback=function(v) Hub.Colors.BGDBColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Stroke Color",Default=Hub.Colors.StrokeColor,Callback=function(v) Hub.Colors.StrokeColor=v Hub:RefreshCurrentColor() end})
 UISec:AddButton({Name="Copy Discord",Callback=function() pcall(function() setclipboard(DISCORD) end) Notify.new({Title="Copied",Content="Discord link copied!",Duration=2,Icon=ICON}) end})
+UISec:AddButton({Name="Destroy GUI",Callback=function()
+    Running=false
+    pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
+    for _,c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
+    task.delay(0.15,function() pcall(function() Win:Destroy() end) end)
+end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
 InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nGojo: renders via Yuji's cached position\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
 local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
 ThSec:AddDropdown({Name="Select Theme",Default="Default",Values={"Default","Dark Green","Dark Blue","Purple Rose","Skeet"},Callback=function(v) Hub:SetTheme(v) end})
 local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
 CfgUI:Init()
-Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
-SetupAntiAFK()
-task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and QState=="ACTIVE" and not BossFight then if QuestScanComplete() then QCompDet=true end end task.wait(0.1) end end)
-task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end task.wait(8) end end)
-task.spawn(function()
-    while Running do
-        if not F.AutoFarmLevel then task.wait(0.3) continue end
-        if not IsAlive() then
-            ClearTgt() HoverPos=nil WaitChar() task.wait(0.3)
-            if F.AutoEquip then EquipSword() task.wait(0.2) end
-            if not BossFight then IslandTPd=false SpawnDone=false end
-            LastBossTP=0 BossTPDone=false
-        end
-        if not IsAlive() then task.wait(0.3) continue end
-        if(F.BossEnabled or F.AnosEnabled) and not BossFight then
-            local nextName=PickNextBossName()
-            if nextName then
-                BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 BossCurrentIsland=GetBossIsland(nextName) ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
-                Notify.new({Title="BOSS: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?").." | Stopping farm",Duration=4,Icon=ICON})
+task.defer(function()
+    pcall(function()
+        local hubGui
+        for _,ch in ipairs(LP.PlayerGui:GetChildren()) do if ch:IsA("ScreenGui") and ch.Name:find("PIMPLE") then hubGui=ch break end end
+        if not hubGui then return end
+        local bc=BrightenColor(Hub.Colors.Toggle)
+        for _,d in ipairs(hubGui:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("ImageButton") or d:IsA("Frame")) and d:FindFirstChildOfClass("UICorner") then
+                local s=d:FindFirstChildOfClass("UIStroke")
+                if not s then s=Instance.new("UIStroke") s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border s.Parent=d end
+                s.Thickness=2 s.Color=bc
+                table.insert(ButtonBorderStrokes,s)
             end
         end
-        if BossFight then DoBossTick() task.wait(0.1) continue end
-        DoFarmTick()
-        task.wait(0.1)
+    end)
+end)
+Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
+SetupAntiAFK()
+task.spawn(DisableGameAutoSkills)
+task.spawn(function() while Running do if F.AutoQuest then QuestCompletionScan() end task.wait(2) end end)
+task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
+task.spawn(function()
+    while Running do
+        repeat
+            local isSummonActive=F.SummonBossEnabled and HasAnySummonBossEnabled()
+            if not F.AutoFarmLevel and not isSummonActive then task.wait(0.3) break end
+            if not IsAlive() then
+                ClearTgt() HoverPos=nil WaitChar() task.wait(0.3)
+                if F.AutoEquip then EquipSword() task.wait(0.2) end
+                if not BossFight and not SummonBossFight then IslandTPd=false SpawnDone=false end
+                LastBossTP=0 BossTPDone=false LastSummonBossTP=0 SummonBossTPDone=false
+            end
+            if not IsAlive() then task.wait(0.3) break end
+            if not isSummonActive and SummonBossFight then ExitSummonBossMode() end
+            if isSummonActive and not SummonBossFight then
+                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                Notify.new({Title="Summon Boss Mode",Content="Heading to Boss Island",Duration=3,Icon=ICON})
+            end
+            if SummonBossFight then DoSummonBossTick() task.wait(0.1) break end
+            if not F.AutoFarmLevel then task.wait(0.3) break end
+            if(F.BossEnabled or F.AnosEnabled) and not BossFight then
+                local nextName=PickNextBossName()
+                if nextName then
+                    BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 BossCurrentIsland=GetBossIsland(nextName) ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                    Notify.new({Title="BOSS: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?").." | Stopping farm",Duration=4,Icon=ICON})
+                end
+            end
+            if BossFight then DoBossTick() task.wait(0.1) break end
+            DoFarmTick()
+            task.wait(0.1)
+        until true
     end
 end)
