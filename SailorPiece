@@ -517,6 +517,9 @@ fn.EquipSword=function()
 end
 fn.GetGoalForEnemy=function(enemy)
     local pos=fn.ModelPos(enemy) if not pos then return nil,nil end
+    if S.BossFight and F.FarmMode=="Plank" and S.HoverPos then
+        return Vector3.new(pos.X,math.max(pos.Y+F.HeightOffset,S.HoverPos.Y),pos.Z),pos
+    end
     if F.FarmMode=="Behind" then
         local ecf=fn.ModelCF(enemy)
         if ecf then
@@ -631,13 +634,7 @@ fn.Conn(RunService.RenderStepped:Connect(function()
         if S.CharHum then S.CharHum.PlatformStand=true end
         if tick()-S.LastCanCollide>1 then S.LastCanCollide=tick() for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
     end
-    if inBossFight and not F.AutoFarmLevel then
-        if F.FarmMode=="Plank" then
-            hrp.AssemblyLinearVelocity=Vector3.zero
-            hrp.AssemblyAngularVelocity=Vector3.zero
-        end
-        return
-    end
+
     if S.TweenOn then return end
     if S.LockTarget then
         local hm=fn.GetHum(S.LockTarget)
@@ -656,7 +653,7 @@ fn.Conn(RunService.RenderStepped:Connect(function()
         if goal then
             if goal.Y<-30 then S.LockTarget=nil
             else
-                if F.FarmMode=="Plank" and S.HoverPos then goal=Vector3.new(goal.X,S.HoverPos.Y,goal.Z) end
+                if F.FarmMode=="Plank" and S.HoverPos then goal=Vector3.new(goal.X,math.max(goal.Y,S.HoverPos.Y),goal.Z) end
                 hrp.CFrame=CFrame.new(goal,look or goal) S.HoverPos=goal
             end
         end
@@ -670,11 +667,17 @@ fn.Conn(RunService.RenderStepped:Connect(function()
 end))
 fn.ExitBossMode=function(lastBossName)
     local bi=lastBossName and fn.GetBossIsland(lastBossName)
+    local savedHover=S.HoverPos
     S.BossFight=false S.BossTargetName=nil S.BossTPDone=false S.BossCurrentIsland=nil fn.ClearTgt() S.HoverPos=nil S.LastBossTP=0
     S.LastEnemy=0
     local farmIsland=fn.GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         S.CurIsland=farmIsland S.IslandTPd=true S.SpawnDone=true S.LastEnemy=tick()
+        if savedHover then
+            S.HoverPos=savedHover
+            local hrp=fn.PlayerHRP()
+            if hrp then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
+        end
         if F.AutoQuest and S.QState~="ACTIVE" then task.delay(0.15,function() fn.QuestAccept(S.CurIsland) end) end
         S.Notify.new({Title="Bosses Clear!",Content="Already on "..bi..", resuming farm",Duration=3,Icon=S.ICON})
     else
@@ -802,10 +805,20 @@ fn.DoBossTick=function()
     if model and fn.IsAnosModel(S.BossTargetName) and model.Name~=S.BossTargetName then S.BossTargetName=model.Name end
     if not model then
         local deadName=S.BossTargetName
+        local deadIsland=fn.GetBossIsland(deadName)
         S.BossKills=S.BossKills+1 S.Kills=S.Kills+1 S.KillCount=S.KillCount+1 fn.RecordBossDeath(deadName)
         S.Notify.new({Title="Killed "..fn.GetBossDisplay(deadName),Content="Successfully killed "..fn.GetBossDisplay(deadName),Duration=4,Icon=S.ICON})
         local savedHover=S.HoverPos
+        if not savedHover then
+            local hrp=fn.PlayerHRP()
+            if hrp then savedHover=Vector3.new(hrp.Position.X,hrp.Position.Y+F.HeightOffset,hrp.Position.Z) end
+        end
         S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() task.wait(0.15)
+        if savedHover then
+            S.HoverPos=savedHover
+            local hrp=fn.PlayerHRP()
+            if hrp then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
+        end
         local nextName=fn.PickNextBossName()
         if nextName then
             S.BossTargetName=nextName
@@ -833,6 +846,24 @@ fn.GetSummonBossDiff=function(name)
     if name=="AnosBoss" then return F.AnosDiff end
     return nil
 end
+fn.DetectSummonError=function()
+    local found=false
+    pcall(function()
+        local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+        for _,d in ipairs(pg:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                local txt=(d.Text or ""):lower()
+                if ((txt:find("don't have") or txt:find("doesn't have") or txt:find("don%'t have") or txt:find("not enough")) and (txt:find("material") or txt:find("item") or txt:find("summon") or txt:find("spawn"))) or txt:find("cannot summon") or txt:find("can't summon") or txt:find("can%'t summon") then
+                    found=true
+                    local p=d while p and not p:IsA("ScreenGui") do p=p.Parent end
+                    if p then pcall(function() p.Enabled=false end) end
+                    pcall(function() d.Visible=false end)
+                end
+            end
+        end
+    end)
+    return found
+end
 fn.FireSummonBoss=function(name)
     if not S.BSF[name] then return end
     pcall(function()
@@ -848,6 +879,16 @@ fn.FireSummonBoss=function(name)
             if diff then r:FireServer(name,diff) else r:FireServer(name) end
         end
     end)
+end
+fn.CheckSummonResult=function(name,timeout)
+    local deadline=tick()+(timeout or 3)
+    while tick()<deadline do
+        local m=fn.CheckSummonBoss(name)
+        if m and fn.SummonBossPosValid(m) then return true end
+        if fn.DetectSummonError() then return false end
+        task.wait(0.15)
+    end
+    return nil
 end
 fn.GetSummonBossIsland=function(name) return S.SummonBossIslandMap[name] or S.BOSS_ISLAND_PORTAL end
 fn.CheckSummonBoss=function(name)
@@ -929,6 +970,16 @@ fn.DoSummonBossTick=function()
                 S.SummonBossFireTime[b.Name]=tick()
                 S.SummonBossOrder=S.SummonBossOrder+1
                 S.SummonBossCommitted[b.Name]=S.SummonBossOrder
+                task.wait(0.3)
+                local result=fn.CheckSummonResult(b.Name,2.5)
+                if result==false then
+                    S.SummonBossCommitted[b.Name]=nil
+                    S.SummonBossFailCount[b.Name]=10
+                    S.BSF[b.Name]=false
+                    local tgl=S.BSFToggle[b.Name]
+                    if tgl then pcall(function() tgl:SetValue(false) end) end
+                    S.Notify.new({Title="No Materials",Content=(S.SummonBossDisplay[b.Name] or b.Name).." disabled — no materials",Duration=5,Icon=S.ICON})
+                end
                 task.wait(0.1)
             end
         end
@@ -987,17 +1038,24 @@ fn.DoSummonBossTick=function()
             for _,b in ipairs(S.SummonBosses) do
                 if S.SummonBossCommitted[b.Name] and fn.GetSummonBossIsland(b.Name)==S.SummonBossCurrentIsland and not fn.CheckSummonBoss(b.Name) then
                     local fireT=S.SummonBossFireTime[b.Name] or 0
-                    if tick()-fireT<3 then
+                    if tick()-fireT<8 then
                         anyGrace=true
                     else
-                        S.SummonBossCommitted[b.Name]=nil
-                        S.BSF[b.Name]=false
-                        local tgl=S.BSFToggle[b.Name]
-                        if tgl then
-                            pcall(function() tgl:SetValue(false) end)
+                        S.SummonBossFailCount[b.Name]=(S.SummonBossFailCount[b.Name] or 0)+1
+                        if (S.SummonBossFailCount[b.Name] or 0)>=3 then
+                            S.SummonBossCommitted[b.Name]=nil
+                            S.BSF[b.Name]=false
+                            local tgl=S.BSFToggle[b.Name]
+                            if tgl then
+                                pcall(function() tgl:SetValue(false) end)
+                            end
+                            local dsp=S.SummonBossDisplay[b.Name] or b.Name
+                            S.Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=S.ICON})
+                        else
+                            fn.FireSummonBoss(b.Name)
+                            S.SummonBossFireTime[b.Name]=tick()
+                            anyGrace=true
                         end
-                        local dsp=S.SummonBossDisplay[b.Name] or b.Name
-                        S.Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=S.ICON})
                     end
                 end
             end
@@ -1046,6 +1104,16 @@ fn.DoSummonBossTick=function()
             S.SummonBossFireTime[deadName]=tick()
             S.SummonBossOrder=S.SummonBossOrder+1
             S.SummonBossCommitted[deadName]=S.SummonBossOrder
+            task.wait(0.3)
+            local result=fn.CheckSummonResult(deadName,2.5)
+            if result==false then
+                S.SummonBossCommitted[deadName]=nil
+                S.SummonBossFailCount[deadName]=10
+                S.BSF[deadName]=false
+                local tgl=S.BSFToggle[deadName]
+                if tgl then pcall(function() tgl:SetValue(false) end) end
+                S.Notify.new({Title="No Materials",Content=(S.SummonBossDisplay[deadName] or deadName).." disabled — no materials",Duration=5,Icon=S.ICON})
+            end
         end
         local nextName,nextModel=fn.AcquireSummonBossFast(deadName,4)
         S.SummonBossTarget=nextName
