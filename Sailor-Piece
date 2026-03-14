@@ -16,6 +16,7 @@ local COMBAT_HIT_PATH={"CombatSystem","Remotes","RequestHit"}
 local ABILITY_PATH={"AbilitySystem","Remotes","RequestAbility"}
 local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
 local SETTINGS_TOGGLE_PATH={"RemoteEvents","SettingsToggle"}
+local QUEST_REPEAT_PATH={"RemoteEvents","QuestRepeat"}
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
     {Portal="Jungle",FarmUntil=750,Enemies={"Monkey"},QuestNPC="QuestNPC3"},
@@ -29,6 +30,8 @@ local Islands={
     {Portal="Judgement",FarmUntil=999999,Enemies={"Swordsman"},QuestNPC="QuestNPC16"},
 }
 local TpIslands={"Starter","Jungle","Desert","Snow","Sailor","Shibuya","HuecoMundo","Boss","Dungeon","Shinjuku","Slime","Academy","Judgement"}
+local PortalDisplayNames={HuecoMundo="Hueco Mundo"}
+local function PortalDisplayName(p) return PortalDisplayNames[p] or p end
 local Bosses={
     {Name="AizenBoss",Display="Aizen",Island="HuecoMundo"},
     {Name="AlucardBoss",Display="Alucard",Island="Sailor"},
@@ -176,6 +179,7 @@ local function EnableGameQuestRepeat()
     end)
 end
 local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" task.spawn(EnableGameQuestRepeat) end
+local function QuestRepeatFire(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_REPEAT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
 local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" end
 local function QuestCompletionScan()
     if QState~="ACTIVE" then return end
@@ -222,18 +226,10 @@ local function SafeInvoke(remote,timeout,...)
     while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
     return ok,result
 end
-local function HasChestInInventory(name)
-    local lo=name:lower()
-    local bp=LP:FindFirstChild("Backpack")
-    if bp then for _,t in ipairs(bp:GetChildren()) do if t.Name:lower()==lo then return true end end end
-    local char=LP.Character
-    if char then for _,t in ipairs(char:GetChildren()) do if t:IsA("Tool") and t.Name:lower()==lo then return true end end end
-    return false
-end
 local function OpenAllChests()
     if not F.AutoChest then return end
     local anyInInventory=false
-    for _,name in ipairs(ChestNames) do if HasChestInInventory(name) then anyInInventory=true break end end
+    for _,name in ipairs(ChestNames) do if PlayerHasChest(name) then anyInInventory=true break end end
     if not anyInInventory then return end
     if tick()-LastChest<5 then return end
     LastChest=tick()
@@ -242,7 +238,7 @@ local function OpenAllChests()
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        if HasChestInInventory(name) then
+        if PlayerHasChest(name) then
             if isEvent then
                 pcall(function() useItem:FireServer("Use",name,999,false) end)
             else
@@ -267,7 +263,7 @@ local function BuyMerchantItems()
         if FM[item] then
             for _=1,15 do
                 local ok,result=SafeInvoke(remote,3,item,1)
-                if not ok or result==false or result==nil then break end
+                if not ok or result==false then break end
                 if type(result)=="table" and result.success==false then break end
                 if F.MerchNotify then
                     Notify.new({Title="Auto Merchant",Content="Purchased "..item,Duration=4,Icon=ICON})
@@ -602,7 +598,7 @@ local function DoFarmTick()
     if not CurIsland or CurIsland.Portal~=tgtIsland.Portal then
         StopTw() QuestAbandon() task.wait(0.15)
         CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=0
-        Notify.new({Title="-> "..tgtIsland.Portal,Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
+        Notify.new({Title="Teleporting to "..PortalDisplayName(tgtIsland.Portal),Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
     end
     if not IslandTPd then
         if DoTP(CurIsland.Portal) then
@@ -615,7 +611,7 @@ local function DoFarmTick()
         return
     end
     if F.AutoQuest and QState=="NONE" then
-        if tick()-LastQuestAccept>5 then QuestAccept(CurIsland) end
+        if tick()-LastQuestAccept>5 then QuestRepeatFire(CurIsland) end
     end
     local enemies=FindEnemies(CurIsland)
     if #enemies>0 then
@@ -641,7 +637,7 @@ local function DoBossTick()
         if nextName then
             BossTargetName=nextName BossTPDone=false LastBossTP=0 ClearTgt() HoverPos=nil
             BossCurrentIsland=GetBossIsland(nextName)
-            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
+            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..PortalDisplayName(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(nil) end
         return
     end
@@ -655,7 +651,7 @@ local function DoBossTick()
         end
         if tick()-LastBossTP<4 then task.wait(0.2) return end
         ClearTgt() HoverPos=nil LastBossTP=tick()
-        Notify.new({Title="TP -> "..bi,Content=GetBossDisplay(BossTargetName),Duration=2,Icon=ICON})
+        Notify.new({Title="Teleporting to "..PortalDisplayName(bi),Content=GetBossDisplay(BossTargetName),Duration=2,Icon=ICON})
         ForceTP(bi)
         task.wait(1.5)
         BossCurrentIsland=bi
@@ -692,7 +688,7 @@ local function DoBossTick()
             if nextName then
                 BossTargetName=nextName BossTPDone=false LastBossTP=0
                 BossCurrentIsland=GetBossIsland(nextName)
-                Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
+                Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..PortalDisplayName(BossCurrentIsland or "?"),Duration=3,Icon=ICON})
             else ExitBossMode(deadName) end
         else BossTPDone=true end
         return
@@ -710,7 +706,7 @@ local function DoBossTick()
             local nextIsland=GetBossIsland(nextName)
             if nextIsland==BossCurrentIsland then BossTPDone=true
             else BossTPDone=false LastBossTP=0 BossCurrentIsland=nextIsland end
-            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..(nextIsland or "?"),Duration=3,Icon=ICON})
+            Notify.new({Title="Next: "..GetBossDisplay(nextName),Content="On "..PortalDisplayName(nextIsland or "?"),Duration=3,Icon=ICON})
         else ExitBossMode(deadName) end
         return
     end
@@ -769,7 +765,7 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
 local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
-for _,name in ipairs(TpIslands) do TpSec:AddButton({Name=name,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(name) Notify.new({Title="TP -> "..name,Content="Teleporting...",Duration=2,Icon=ICON}) end}) end
+for _,name in ipairs(TpIslands) do TpSec:AddButton({Name=name,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(name) Notify.new({Title="Teleporting to "..PortalDisplayName(name),Content="...",Duration=2,Icon=ICON}) end}) end
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
 BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
