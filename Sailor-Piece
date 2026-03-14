@@ -616,12 +616,20 @@ if LP.Character then task.spawn(function() OnCharAdded(LP.Character) end) end
 Conn(LP.CharacterAdded:Connect(OnCharAdded))
 local function GetIslandNames() local n={"Auto"} for _,i in ipairs(Islands) do table.insert(n,i.Portal) end return n end
 Conn(RunService.RenderStepped:Connect(function()
-    if not F.AutoFarmLevel then return end
+    local inBossFight=SummonBossFight or BossFight
+    if not F.AutoFarmLevel and not inBossFight then return end
     local c=LP.Character if not c then return end
     local hrp=c:FindFirstChild("HumanoidRootPart") if not hrp then return end
     if F.FarmMode=="Plank" then
         if CharHum then CharHum.PlatformStand=true end
         if tick()-LastCanCollide>1 then LastCanCollide=tick() for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+    end
+    if inBossFight and not F.AutoFarmLevel then
+        if F.FarmMode=="Plank" then
+            hrp.AssemblyLinearVelocity=Vector3.zero
+            hrp.AssemblyAngularVelocity=Vector3.zero
+        end
+        return
     end
     if TweenOn then return end
     if LockTarget then
@@ -1024,7 +1032,7 @@ task.spawn(function()
             if not IsAlive() then task.wait(0.3) break end
             if not isSummonActive and SummonBossFight then ExitSummonBossMode() end
             if isSummonActive and not SummonBossFight then
-                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
                 Notify.new({Title="Summon Boss Mode",Content="Heading to Boss Island",Duration=3,Icon=ICON})
             end
             if SummonBossFight then DoSummonBossTick() task.wait(0.1) break end
