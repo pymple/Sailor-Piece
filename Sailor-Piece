@@ -635,12 +635,22 @@ Conn(RunService.RenderStepped:Connect(function()
         local hm=GetHum(LockTarget)
         if not hm or hm.Health<=0 or not LockTarget.Parent then LockTarget=nil
         elseif not BossFight and CurIsland then if not MatchEnemy(LockTarget.Name,CurIsland) and not IsBoss(LockTarget.Name) then LockTarget=nil end end
+        if LockTarget then
+            local tp=ModelPos(LockTarget)
+            if tp then
+                if tp.Y<-30 then LockTarget=nil end
+                if LockTarget and hrp and (tp-hrp.Position).Magnitude>600 then LockTarget=nil end
+            end
+        end
     end
     if LockTarget then
         local goal,look=GetGoalForEnemy(LockTarget)
         if goal then
-            if F.FarmMode=="Plank" and HoverPos then goal=Vector3.new(goal.X,HoverPos.Y,goal.Z) end
-            hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal
+            if goal.Y<-30 then LockTarget=nil
+            else
+                if F.FarmMode=="Plank" and HoverPos then goal=Vector3.new(goal.X,HoverPos.Y,goal.Z) end
+                hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal
+            end
         end
     elseif HoverPos then
         hrp.CFrame=CFrame.new(HoverPos,HoverPos+LOOK_DOWN)
@@ -823,26 +833,42 @@ local function HasAnySummonBossEnabled()
     return false
 end
 local function PickNextSummonBoss()
+    local hrp=PlayerHRP()
+    local bestName,bestDist=nil,math.huge
     for _,b in ipairs(SummonBosses) do
-        if BSF[b.Name] or SummonBossCommitted[b.Name] then local m=CheckSummonBoss(b.Name) if m then return b.Name end end
+        local m=CheckSummonBoss(b.Name)
+        if m then
+            SummonBossCommitted[b.Name]=true
+            if not hrp then return b.Name end
+            local p=ModelPos(m)
+            local d=p and (hrp.Position-p).Magnitude or math.huge
+            if d<bestDist then bestDist=d bestName=b.Name end
+        end
     end
-    return nil
+    return bestName
 end
 local function ExitSummonBossMode()
     SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={}
     ClearTgt() HoverPos=nil
+end
+local function SummonBossPosValid(model)
+    local p=ModelPos(model)
+    if not p then return false end
+    if p.Y<-30 then return false end
+    return true
 end
 local function AcquireSummonBossFast(preferredName,timeout)
     local deadline=tick()+(timeout or 1.2)
     while tick()<deadline do
         if preferredName then
             local preferred=CheckSummonBoss(preferredName)
-            if preferred then return preferredName,preferred end
+            if preferred and SummonBossPosValid(preferred) then return preferredName,preferred end
         end
-        local nextName=PickNextSummonBoss()
-        if nextName then
-            local m=CheckSummonBoss(nextName)
-            if m then return nextName,m end
+        for _,b in ipairs(SummonBosses) do
+            if BSF[b.Name] or SummonBossCommitted[b.Name] then
+                local m=CheckSummonBoss(b.Name)
+                if m and SummonBossPosValid(m) then return b.Name,m end
+            end
         end
         task.wait(0.05)
     end
@@ -864,12 +890,6 @@ local function DoSummonBossTick()
         SummonBossTPDone=true SummonBossTarget=nextName
         if nextModel then
             CurTarget=nextModel
-            local p=ModelPos(nextModel)
-            local hrp=PlayerHRP()
-            if p and hrp and (hrp.Position-p).Magnitude>35 then
-                StopTw()
-                hrp.CFrame=CFrame.new(p.X,p.Y+F.HeightOffset,p.Z)
-            end
         end
         return
     end
@@ -888,28 +908,35 @@ local function DoSummonBossTick()
     end
     local model=CheckSummonBoss(SummonBossTarget)
     if not model then
+        -- Brief recheck to avoid false death from lag (same boss only, never switch)
+        task.wait(0.25)
+        model=CheckSummonBoss(SummonBossTarget)
+        if model then CurTarget=model return end
+        -- Truly dead — attribute kill with the CORRECT target name
         local deadName=SummonBossTarget
         local deadDisplay=SummonBossDisplay[deadName] or deadName
         BossKills=BossKills+1 Kills=Kills+1
         Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
         SummonBossTarget=nil ClearTgt()
+        -- Keep HoverPos so player stays at last good position (don't nil it)
+        -- Re-summon if enabled
         if BSF[deadName] then FireSummonBoss(deadName) SummonBossCommitted[deadName]=true end
-        local nextName,nextModel=AcquireSummonBossFast(deadName,1.25)
+        -- Poll for new boss (position-validated)
+        local nextName,nextModel=AcquireSummonBossFast(deadName,1.5)
         SummonBossTarget=nextName
-        if nextModel then
-            CurTarget=nextModel
-            local p=ModelPos(nextModel)
-            local hrp=PlayerHRP()
-            if p and hrp and (hrp.Position-p).Magnitude>35 then
-                StopTw()
-                hrp.CFrame=CFrame.new(p.X,p.Y+F.HeightOffset,p.Z)
-            end
-        end
+        if nextModel then CurTarget=nextModel end
         return
     end
     local bossPos=ModelPos(model)
-    if not bossPos or bossPos.Y < -100 then task.wait(0.2) return end
+    if not bossPos or bossPos.Y<-30 then task.wait(0.15) return end
+    -- If boss is unreasonably far, re-teleport to boss island instead of tweening to garbage
+    local _hrp=PlayerHRP()
+    if _hrp and (bossPos-_hrp.Position).Magnitude>600 then
+        SummonBossTPDone=false LastSummonBossTP=0
+        ClearTgt()
+        return
+    end
     CurTarget=model
     TweenTo(model)
     Attack(model)
