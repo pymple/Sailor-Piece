@@ -190,7 +190,7 @@ fn.IsAlive=function() local c=LP.Character if not c then return false end local 
 fn.WaitChar=function() if fn.IsAlive() then return true end local t=tick() while tick()-t<20 do if fn.IsAlive() then task.wait(0.5) return true end task.wait(0.15) end return false end
 fn.IsPlayer=function(m) for _,p in ipairs(Players:GetPlayers()) do if p.Character==m then return true end end return false end
 fn.ShouldIgnore=function(n) local lo=n:lower() for _,ig in ipairs(S.IgnoreList) do if lo:find(ig,1,true) then return true end end if lo:match("boss$") then return true end return false end
-fn.MatchEnemy=function(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do if lo:find(e:lower(),1,true) then return true end end return false end
+fn.MatchEnemy=function(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do local el=e:lower() if lo:sub(1,#el)==el then return true end end return false end
 fn.AbandonAllQuests=function()
     S.QState="NONE"
     if not S.CachedQuestAbandon then
@@ -603,7 +603,7 @@ fn.Attack=function(tgt)
     fn.FireAbilities()
 end
 fn.ToggleFarm=function() if S.FarmToggle then pcall(function() S.FarmToggle:SetValue(not S.FarmToggle:GetValue()) end) else F.AutoFarmLevel=not F.AutoFarmLevel if not F.AutoFarmLevel then fn.FullReset() end end end
-fn.ToggleBoss=function() if S.BossToggle then pcall(function() S.BossToggle:SetValue(not S.BossToggle:GetValue()) end) else F.BossEnabled=not F.BossEnabled if not F.BossEnabled and S.BossFight then fn.FullReset() end end end
+fn.ToggleBoss=function() if S.BossToggle then pcall(function() S.BossToggle:SetValue(not S.BossToggle:GetValue()) end) else F.BossEnabled=not F.BossEnabled if not F.BossEnabled and S.BossFight then fn.ExitBossMode(S.BossTargetName) end end end
 fn.ToggleSummonBoss=function() if S.SummonBossToggle then pcall(function() S.SummonBossToggle:SetValue(not S.SummonBossToggle:GetValue()) end) else F.SummonBossEnabled=not F.SummonBossEnabled if not F.SummonBossEnabled then fn.ExitSummonBossMode() end end end
 fn.ToggleAllSkills=function()
     local anyOn=false
@@ -674,7 +674,7 @@ fn.ExitBossMode=function(lastBossName)
     local bi=lastBossName and fn.GetBossIsland(lastBossName)
     local savedHover=S.HoverPos
     S.BossFight=false S.BossTargetName=nil S.BossTPDone=false S.BossCurrentIsland=nil fn.ClearTgt() S.HoverPos=nil S.LastBossTP=0
-    S.LastEnemy=0
+    S.LastEnemy=0 S.LastTP=0
     local farmIsland=fn.GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         S.CurIsland=farmIsland S.IslandTPd=true S.SpawnDone=true S.LastEnemy=tick()
@@ -953,7 +953,7 @@ end
 fn.ExitSummonBossMode=function()
     S.SummonBossFight=false S.SummonBossTarget=nil S.SummonBossTPDone=false S.LastSummonBossTP=0 S.SummonBossCommitted={} S.SummonBossCurrentIsland=nil S.SummonBossOrder=0 S.SummonBossFailCount={} S.SummonBossFireTime={}
     fn.ClearTgt() S.HoverPos=nil
-    S.CurIsland=nil S.IslandTPd=false S.SpawnDone=false S.LastEnemy=0
+    S.CurIsland=nil S.IslandTPd=false S.SpawnDone=false S.LastEnemy=0 S.LastTP=0
 end
 fn.SummonBossPosValid=function(model)
     local p=fn.ModelPos(model)
@@ -1238,7 +1238,7 @@ for _,name in ipairs(S.TpIslands) do
     end})
 end
 local BSec=FTab:DrawSection({Name="Auto Farm Boss",Position="right"})
-S.BossToggle=BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and S.BossFight then fn.FullReset() end end})
+S.BossToggle=BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and S.BossFight then fn.ExitBossMode(S.BossTargetName) end end})
 S.BossToggle.Link:AddKeybind({Default="B",Flag="BossKeybind",Callback=fn.ToggleBoss})
 S.BossToggle.Link:AddHelper({Text="Timer-based world bosses"})
 for _,bDef in ipairs(S.Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) S.BF[bDef.Name]=v end}) end
