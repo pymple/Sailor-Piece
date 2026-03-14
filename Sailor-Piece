@@ -228,9 +228,6 @@ local function SafeInvoke(remote,timeout,...)
 end
 local function OpenAllChests()
     if not F.AutoChest then return end
-    local anyInInventory=false
-    for _,name in ipairs(ChestNames) do if PlayerHasChest(name) then anyInInventory=true break end end
-    if not anyInInventory then return end
     if tick()-LastChest<5 then return end
     LastChest=tick()
     local useItem
@@ -238,18 +235,16 @@ local function OpenAllChests()
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        if PlayerHasChest(name) then
-            if isEvent then
-                pcall(function() useItem:FireServer("Use",name,999,false) end)
-            else
-                SafeInvoke(useItem,3,"Use",name,999,false)
-            end
-            task.wait(0.15)
-            ClickYes()
-            task.wait(0.15)
-            ClickYes()
-            task.wait(0.1)
+        if isEvent then
+            pcall(function() useItem:FireServer("Use",name,999,false) end)
+        else
+            SafeInvoke(useItem,3,"Use",name,999,false)
         end
+        task.wait(0.15)
+        ClickYes()
+        task.wait(0.15)
+        ClickYes()
+        task.wait(0.1)
     end
 end
 local function BuyMerchantItems()
@@ -765,7 +760,16 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
 local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
-for _,name in ipairs(TpIslands) do TpSec:AddButton({Name=name,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(name) Notify.new({Title="Teleporting to "..PortalDisplayName(name),Content="...",Duration=2,Icon=ICON}) end}) end
+for _,name in ipairs(TpIslands) do
+    local displayName=PortalDisplayName(name)
+    local isl=IslandByName(name)
+    local enemyList=isl and (#isl.Enemies>0 and table.concat(isl.Enemies,", ") or "None") or "Unknown"
+    TpSec:AddButton({Name=displayName,Callback=function()
+        if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end
+        ForceTP(name)
+        Notify.new({Title="Teleporting to "..displayName,Content="Successfully teleported!\nEnemies: "..enemyList,Duration=4,Icon=ICON})
+    end})
+end
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
 BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
