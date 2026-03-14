@@ -781,12 +781,19 @@ fn.DoBossTick=function()
             local deadName=S.BossTargetName
             S.BossKills=S.BossKills+1 S.Kills=S.Kills+1 S.KillCount=S.KillCount+1 fn.RecordBossDeath(deadName)
             S.Notify.new({Title="Killed "..fn.GetBossDisplay(deadName),Content="Successfully killed "..fn.GetBossDisplay(deadName),Duration=4,Icon=S.ICON})
-            S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() S.HoverPos=nil task.wait(0.15)
+            local savedHover=S.HoverPos
+            S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() task.wait(0.15)
             local nextName=fn.PickNextBossName()
             if nextName then
-                S.BossTargetName=nextName S.BossTPDone=false S.LastBossTP=0
-                S.BossCurrentIsland=fn.GetBossIsland(nextName)
-                S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(S.BossCurrentIsland or "?"),Duration=3,Icon=S.ICON})
+                S.BossTargetName=nextName
+                local nextIsland=fn.GetBossIsland(nextName)
+                if nextIsland==S.BossCurrentIsland then
+                    S.BossTPDone=true
+                    if savedHover then S.HoverPos=savedHover end
+                    local hrp=fn.PlayerHRP()
+                    if hrp and savedHover then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
+                else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland S.HoverPos=nil end
+                S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(nextIsland or "?"),Duration=3,Icon=S.ICON})
             else fn.ExitBossMode(deadName) end
         else S.BossTPDone=true end
         return
@@ -797,13 +804,18 @@ fn.DoBossTick=function()
         local deadName=S.BossTargetName
         S.BossKills=S.BossKills+1 S.Kills=S.Kills+1 S.KillCount=S.KillCount+1 fn.RecordBossDeath(deadName)
         S.Notify.new({Title="Killed "..fn.GetBossDisplay(deadName),Content="Successfully killed "..fn.GetBossDisplay(deadName),Duration=4,Icon=S.ICON})
-        S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() S.HoverPos=nil task.wait(0.15)
+        local savedHover=S.HoverPos
+        S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() task.wait(0.15)
         local nextName=fn.PickNextBossName()
         if nextName then
             S.BossTargetName=nextName
             local nextIsland=fn.GetBossIsland(nextName)
-            if nextIsland==S.BossCurrentIsland then S.BossTPDone=true
-            else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland end
+            if nextIsland==S.BossCurrentIsland then
+                S.BossTPDone=true
+                if savedHover then S.HoverPos=savedHover end
+                local hrp=fn.PlayerHRP()
+                if hrp and savedHover then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
+            else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland S.HoverPos=nil end
             S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(nextIsland or "?"),Duration=3,Icon=S.ICON})
         else fn.ExitBossMode(deadName) end
         return
@@ -971,26 +983,25 @@ fn.DoSummonBossTick=function()
     if not S.SummonBossTarget then
         S.SummonBossTarget=PickBestTarget()
         if not S.SummonBossTarget then
+            local anyGrace=false
             for _,b in ipairs(S.SummonBosses) do
                 if S.SummonBossCommitted[b.Name] and fn.GetSummonBossIsland(b.Name)==S.SummonBossCurrentIsland and not fn.CheckSummonBoss(b.Name) then
                     local fireT=S.SummonBossFireTime[b.Name] or 0
-                    if tick()-fireT<5 then
-                        -- still within grace period, boss may be spawning
+                    if tick()-fireT<3 then
+                        anyGrace=true
                     else
                         S.SummonBossCommitted[b.Name]=nil
-                        S.SummonBossFailCount[b.Name]=(S.SummonBossFailCount[b.Name] or 0)+1
-                        if S.SummonBossFailCount[b.Name]>=6 then
-                            S.BSF[b.Name]=false
-                            local tgl=S.BSFToggle[b.Name]
-                            if tgl then
-                                pcall(function() tgl:SetValue(false) end)
-                            end
-                            local dsp=S.SummonBossDisplay[b.Name] or b.Name
-                            S.Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=S.ICON})
+                        S.BSF[b.Name]=false
+                        local tgl=S.BSFToggle[b.Name]
+                        if tgl then
+                            pcall(function() tgl:SetValue(false) end)
                         end
+                        local dsp=S.SummonBossDisplay[b.Name] or b.Name
+                        S.Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=S.ICON})
                     end
                 end
             end
+            if anyGrace then task.wait(0.2) return end
             if not fn.HasAnySummonBossEnabled() then
                 task.wait(0.3) return
             end
