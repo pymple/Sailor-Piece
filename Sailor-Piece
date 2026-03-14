@@ -44,7 +44,7 @@ local MerchantItems={"Boss Key","Clan Reroll","Dungeon Key","Haki Color Reroll",
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
 local FM={}
@@ -211,6 +211,17 @@ local function PlayerHasChest(name)
     if found:IsA("IntValue") or found:IsA("NumberValue") then return(tonumber(found.Value) or 0)>0 end
     return true
 end
+local function SafeInvoke(remote,timeout,...)
+    local args={...}
+    local done,ok,result=false,false,nil
+    task.spawn(function()
+        local s,r=pcall(function() return remote:InvokeServer(table.unpack(args)) end)
+        ok,result,done=s,r,true
+    end)
+    local t=tick()
+    while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
+    return ok,result
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
     if tick()-LastChest<5 then return end
@@ -223,13 +234,13 @@ local function OpenAllChests()
         if isEvent then
             pcall(function() useItem:FireServer("Use",name,1,false) end)
         else
-            pcall(function() useItem:InvokeServer("Use",name,1,false) end)
+            SafeInvoke(useItem,3,"Use",name,1,false)
         end
-        task.wait(0.08)
+        task.wait(0.15)
         ClickYes()
-        task.wait(0.08)
+        task.wait(0.15)
         ClickYes()
-        task.wait(0.05)
+        task.wait(0.1)
     end
 end
 local function BuyMerchantItems()
@@ -242,22 +253,24 @@ local function BuyMerchantItems()
     for _,item in ipairs(MerchantItems) do
         if FM[item] then
             local bought=0
+            local lastResult
             for _=1,15 do
-                local ok=false
-                local result
-                pcall(function() result=remote:InvokeServer(item,1) ok=true end)
+                local ok,result=SafeInvoke(remote,3,item,1)
                 if not ok then break end
+                lastResult=result
                 bought=bought+1
                 task.wait(0.1)
             end
-            if bought>0 then
-                local info="Purchased x"..bought
-                if type(result)=="table" then
-                    if result.stock~=nil then info=info.." | Stock: "..tostring(result.stock) end
-                    if result.price~=nil then info=info.." | Cost: "..tostring(result.price) end
-                elseif type(result)=="number" then
-                    info=info.." | Stock left: "..tostring(result)
+            if bought>0 and F.MerchNotify then
+                local info="Bought x"..bought
+                if type(lastResult)=="table" then
+                    if lastResult.stock~=nil then info=info.." | Stock left: "..tostring(lastResult.stock) end
+                    if lastResult.price~=nil then info=info.." | Price: "..tostring(lastResult.price) end
+                    if lastResult.name~=nil then info=info.." | "..tostring(lastResult.name) end
+                elseif type(lastResult)=="number" then
+                    info=info.." | Stock left: "..tostring(lastResult)
                 end
+                if bought<15 then info=info.." (stock limit)" end
                 Notify.new({Title="Auto Merchant: "..item,Content=info,Duration=4,Icon=ICON})
             end
         end
@@ -766,6 +779,7 @@ local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
 local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
 MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v end}).Link:AddHelper({Text="Buys selected items every 5s"})
+MSec:AddToggle({Name="Merchant Notifier",Flag="MerchNotify",Default=true,Callback=function(v) F.MerchNotify=v end}).Link:AddHelper({Text="Shows notification when items are purchased"})
 for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
 SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
