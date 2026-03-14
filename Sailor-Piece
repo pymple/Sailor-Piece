@@ -28,17 +28,17 @@ local Islands={
     {Portal="Judgement",FarmUntil=999999,Enemies={"Swordsman"},QuestNPC="QuestNPC16"},
 }
 local Bosses={
-    {Name="SukunaBoss",Display="Sukuna",Island="Shibuya"},
-    {Name="YujiBoss",Display="Yuji",Island="Shibuya"},
-    {Name="GojoBoss",Display="Gojo",Island="Shibuya",RenderNear="YujiBoss"},
     {Name="AizenBoss",Display="Aizen",Island="HuecoMundo"},
     {Name="AlucardBoss",Display="Alucard",Island="Sailor"},
+    {Name="GojoBoss",Display="Gojo",Island="Shibuya",RenderNear="YujiBoss"},
     {Name="JinwooBoss",Display="Jinwoo",Island="Sailor"},
+    {Name="SukunaBoss",Display="Sukuna",Island="Shibuya"},
     {Name="YamatoBoss",Display="Yamato",Island="Judgement"},
+    {Name="YujiBoss",Display="Yuji",Island="Shibuya"},
 }
 local IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 local ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
-local MerchantItems={"Dungeon Key","Haki Color Reroll","Race Reroll","Rush Key","Boss Key","Trait Reroll","Clan Reroll"}
+local MerchantItems={"Boss Key","Clan Reroll","Dungeon Key","Haki Color Reroll","Race Reroll","Rush Key","Trait Reroll"}
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
@@ -696,7 +696,6 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
 local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
-TpSec:AddHelper({Text="Manual TP only — blocked while Auto Farm is ON"})
 for _,isl in ipairs(Islands) do TpSec:AddButton({Name=isl.Portal,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(isl.Portal) Notify.new({Title="TP -> "..isl.Portal,Content="Teleporting...",Duration=2,Icon=ICON}) end}) end
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
 BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
