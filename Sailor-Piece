@@ -14,6 +14,7 @@ local QUEST_ABANDON_PATH={"RemoteEvents","QuestAbandon"}
 local USE_ITEM_PATH={"Remotes","UseItem"}
 local COMBAT_HIT_PATH={"CombatSystem","Remotes","RequestHit"}
 local ABILITY_PATH={"AbilitySystem","Remotes","RequestAbility"}
+local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
     {Portal="Jungle",FarmUntil=750,Enemies={"Monkey"},QuestNPC="QuestNPC3"},
@@ -37,18 +38,21 @@ local Bosses={
 }
 local IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 local ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
+local MerchantItems={"Dungeon Key","Haki Color Reroll","Race Reroll","Rush Key","Boss Key","Trait Reroll","Clan Reroll"}
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
+local FM={}
+for _,item in ipairs(MerchantItems) do FM[item]=false end
 local Kills,BossKills=0,0
 local Hub,Notify,Win,CfgMgr,FarmToggle
 local Running=true
 local CurIsland,CurTarget=nil,nil
 local Conns={}
-local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept=0,0,0,0,0,0
+local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant=0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
 local ConfLevel=0
 local ATween,TweenOn=nil,false
@@ -133,7 +137,7 @@ local function GetFarmIsland() local lvl=GetLevel() if lvl==0 then return nil en
 local function IsAlive() local c=LP.Character if not c then return false end local h=c:FindFirstChild("HumanoidRootPart") local hm=c:FindFirstChildOfClass("Humanoid") return h~=nil and hm~=nil and hm.Health>0 end
 local function WaitChar() if IsAlive() then return true end local t=tick() while tick()-t<20 do if IsAlive() then task.wait(0.5) return true end task.wait(0.15) end return false end
 local function IsPlayer(m) for _,p in ipairs(Players:GetPlayers()) do if p.Character==m then return true end end return false end
-local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end return false end
+local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end if lo:match("boss$") then return true end return false end
 local function MatchEnemy(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do if lo:find(e:lower(),1,true) then return true end end return false end
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
@@ -189,6 +193,20 @@ local function OpenAllChests()
         task.wait(0.2)
     end
 end
+local function BuyMerchantItems()
+    if not F.AutoMerchant then return end
+    if tick()-LastMerchant<60 then return end
+    LastMerchant=tick()
+    local remote
+    pcall(function() remote=WalkPathWait(RS,2,unpack(MERCHANT_REMOTE_PATH)) end)
+    if not remote then return end
+    for _,item in ipairs(MerchantItems) do
+        if FM[item] then
+            pcall(function() remote:InvokeServer(item,1) end)
+            task.wait(0.5)
+        end
+    end
+end
 local function SpawnCrystal(island)
     if not island or not F.AutoSpawn then return end
     local cn="SpawnPointCrystal_"..island.Portal
@@ -213,13 +231,17 @@ local function FindEnemies(island)
     if not nf or not island then return {} end
     local hrp=PlayerHRP() if not hrp then return {} end
     local out={}
-    for _,m in ipairs(nf:GetChildren()) do
+    local function checkModel(m)
         if m:IsA("Model") and not IsPlayer(m) and not IsBoss(m.Name) then
             local hm=GetHum(m)
             if hm and hm.Health>0 and not ShouldIgnore(m.Name) then
                 if MatchEnemy(m.Name,island) then local p=ModelPos(m) if p and(hrp.Position-p).Magnitude<400 then table.insert(out,m) end end
             end
         end
+    end
+    for _,child in ipairs(nf:GetChildren()) do
+        if child:IsA("Folder") then for _,m in ipairs(child:GetChildren()) do checkModel(m) end
+        else checkModel(child) end
     end
     return out
 end
@@ -665,7 +687,7 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     local isl=CurIsland or IslandForLevel(GetLevel())
     local en=FindEnemies(isl)
     local nf=GetNPCFolder() local all={}
-    if nf then local ct={} for _,m in ipairs(nf:GetChildren()) do if m:IsA("Model") then ct[m.Name]=(ct[m.Name] or 0)+1 end end for n,c in pairs(ct) do table.insert(all,n.." x"..c) end table.sort(all) end
+    if nf then local ct={} local function addModel(m) if m:IsA("Model") then ct[m.Name]=(ct[m.Name] or 0)+1 end end for _,child in ipairs(nf:GetChildren()) do if child:IsA("Folder") then for _,m in ipairs(child:GetChildren()) do addModel(m) end else addModel(child) end end for n,c in pairs(ct) do table.insert(all,n.." x"..c) end table.sort(all) end
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
@@ -676,6 +698,9 @@ BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
 task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
+local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
+MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v end}).Link:AddHelper({Text="Buys selected items every 60s"})
+for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
 SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
 SSec:AddToggle({Name="Skill X",Flag="SkillX",Default=false,Callback=function(v) F.SkillX=v end}).Link:AddHelper({Text="Auto use"})
@@ -704,7 +729,7 @@ CfgUI:Init()
 Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
 SetupAntiAFK()
 task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and QState=="ACTIVE" and not BossFight then if QuestScanComplete() then QCompDet=true end end task.wait(0.1) end end)
-task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end task.wait(8) end end)
+task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
 task.spawn(function()
     while Running do
         if not F.AutoFarmLevel then task.wait(0.3) continue end
