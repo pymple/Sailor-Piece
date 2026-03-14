@@ -250,8 +250,9 @@ local function FindEnemies(island)
 end
 local function NearestFrom(list)
     local hrp=PlayerHRP() if not hrp then return nil end
+    local myY=hrp.Position.Y
     local best,bd=nil,math.huge
-    for _,e in ipairs(list) do local p=ModelPos(e) if p then local d=(p-hrp.Position).Magnitude if d<bd then bd=d best=e end end end
+    for _,e in ipairs(list) do local p=ModelPos(e) if p and math.abs(p.Y-myY)<150 then local d=(p-hrp.Position).Magnitude if d<bd then bd=d best=e end end end
     return best
 end
 local function FreshBoss(name) local nf=GetNPCFolder() if not nf then return nil end for _,m in ipairs(nf:GetChildren()) do if m:IsA("Model") and m.Name==name then local hm=GetHum(m) if hm and hm.Health>0 then return m end end end return nil end
