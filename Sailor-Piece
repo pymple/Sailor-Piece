@@ -222,8 +222,19 @@ local function SafeInvoke(remote,timeout,...)
     while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
     return ok,result
 end
+local function HasChestInInventory(name)
+    local lo=name:lower()
+    local bp=LP:FindFirstChild("Backpack")
+    if bp then for _,t in ipairs(bp:GetChildren()) do if t.Name:lower()==lo then return true end end end
+    local char=LP.Character
+    if char then for _,t in ipairs(char:GetChildren()) do if t:IsA("Tool") and t.Name:lower()==lo then return true end end end
+    return false
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
+    local anyInInventory=false
+    for _,name in ipairs(ChestNames) do if HasChestInInventory(name) then anyInInventory=true break end end
+    if not anyInInventory then return end
     if tick()-LastChest<5 then return end
     LastChest=tick()
     local useItem
@@ -231,6 +242,7 @@ local function OpenAllChests()
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
+        if not HasChestInInventory(name) then continue end
         if isEvent then
             pcall(function() useItem:FireServer("Use",name,999,false) end)
         else
@@ -754,7 +766,7 @@ FSec:AddToggle({Name="Auto Quest",Flag="AutoQuest",Default=true,Callback=functio
 FSec:AddToggle({Name="Set Spawn Crystal",Flag="AutoSpawn",Default=false,Callback=function(v) F.AutoSpawn=v SpawnDone=false end}).Link:AddHelper({Text="TP to crystal on arrival"})
 FSec:AddToggle({Name="Anti-AFK",Flag="AntiAFK",Default=true,Callback=function(v) F.AntiAFK=v end}).Link:AddHelper({Text="Prevents disconnect"})
 FSec:AddDropdown({Name="Island",Default="Auto",Values=GetIslandNames(),Flag="SelectedIsland",Callback=function(v) F.SelectedIsland=v FullReset() end})
-FSec:AddDropdown({Name="Farm Style",Default="Plank",Values={"Plank","Behind"},Flag="FarmMode",Callback=function(v) F.FarmMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Plank = hover above | Behind = stand behind"})
+FSec:AddDropdown({Name="Farm Style",Default="Plank",Values={"Plank","Behind"},Flag="FarmMode",Callback=function(v) F.FarmMode=v ClearTgt() HoverPos=nil if v~="Plank" then pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end) end end}).Link:AddHelper({Text="Plank = hover above | Behind = stand behind"})
 FSec:AddDropdown({Name="Move Mode",Default="Tween",Values={"Tween","Teleport"},Flag="MoveMode",Callback=function(v) F.MoveMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Tween = smooth | Teleport = instant"})
 FSec:AddSlider({Name="Height (Plank)",Min=5,Max=40,Default=10,Round=0,Flag="HeightOffset",Callback=function(v) F.HeightOffset=v end})
 FSec:AddSlider({Name="Behind Dist",Min=2,Max=15,Default=5,Round=0,Flag="BehindDist",Callback=function(v) F.BehindDist=v end})
