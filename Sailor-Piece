@@ -232,9 +232,9 @@ local function OpenAllChests()
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
         if isEvent then
-            pcall(function() useItem:FireServer("Use",name,1,false) end)
+            pcall(function() useItem:FireServer("Use",name,999,false) end)
         else
-            SafeInvoke(useItem,3,"Use",name,1,false)
+            SafeInvoke(useItem,3,"Use",name,999,false)
         end
         task.wait(0.15)
         ClickYes()
@@ -256,22 +256,21 @@ local function BuyMerchantItems()
             local lastResult
             for _=1,15 do
                 local ok,result=SafeInvoke(remote,3,item,1)
-                if not ok then break end
-                lastResult=result
+                if not ok or result==false or result==nil then break end
+                if type(result)=="table" and result.success==false then break end
                 bought=bought+1
+                lastResult=result
                 task.wait(0.1)
             end
             if bought>0 and F.MerchNotify then
-                local info="Bought x"..bought
+                local info="Purchased x"..bought.." "..item
                 if type(lastResult)=="table" then
-                    if lastResult.stock~=nil then info=info.." | Stock left: "..tostring(lastResult.stock) end
-                    if lastResult.price~=nil then info=info.." | Price: "..tostring(lastResult.price) end
-                    if lastResult.name~=nil then info=info.." | "..tostring(lastResult.name) end
+                    if lastResult.stock~=nil then info=info.." | Remaining stock: "..tostring(lastResult.stock) end
+                    if lastResult.price~=nil then info=info.." | Price/ea: "..tostring(lastResult.price) end
                 elseif type(lastResult)=="number" then
-                    info=info.." | Stock left: "..tostring(lastResult)
+                    info=info.." | Remaining stock: "..tostring(lastResult)
                 end
-                if bought<15 then info=info.." (stock limit)" end
-                Notify.new({Title="Auto Merchant: "..item,Content=info,Duration=4,Icon=ICON})
+                Notify.new({Title="Auto Merchant",Content=info,Duration=4,Icon=ICON})
             end
         end
     end
