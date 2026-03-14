@@ -478,7 +478,10 @@ Conn(RunService.RenderStepped:Connect(function()
     end
     if LockTarget then
         local goal,look=GetGoalForEnemy(LockTarget)
-        if goal then hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal end
+        if goal then
+            if F.FarmMode=="Plank" and HoverPos then goal=Vector3.new(goal.X,HoverPos.Y,goal.Z) end
+            hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal
+        end
     elseif HoverPos then
         hrp.CFrame=CFrame.new(HoverPos,HoverPos+Vector3.new(0,-1,0))
     end
