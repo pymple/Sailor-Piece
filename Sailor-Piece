@@ -226,6 +226,21 @@ local function SafeInvoke(remote,timeout,...)
     while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
     return ok,result
 end
+local function SuppressHasItemError()
+    pcall(function()
+        local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+        for _,d in ipairs(pg:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                local txt=(d.Text or ""):lower()
+                if (txt:find("don") or txt:find("doesn")) and txt:find("have") then
+                    local p=d while p and not p:IsA("ScreenGui") do p=p.Parent end
+                    if p then pcall(function() p.Enabled=false end) end
+                    pcall(function() d.Visible=false end)
+                end
+            end
+        end
+    end)
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
     if tick()-LastChest<5 then return end
@@ -241,8 +256,10 @@ local function OpenAllChests()
             SafeInvoke(useItem,3,"Use",name,999,false)
         end
         task.wait(0.15)
+        SuppressHasItemError()
         ClickYes()
         task.wait(0.15)
+        SuppressHasItemError()
         ClickYes()
         task.wait(0.1)
     end
@@ -762,12 +779,10 @@ end})
 local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
 for _,name in ipairs(TpIslands) do
     local displayName=PortalDisplayName(name)
-    local isl=IslandByName(name)
-    local enemyList=isl and (#isl.Enemies>0 and table.concat(isl.Enemies,", ") or "None") or "Unknown"
     TpSec:AddButton({Name=displayName,Callback=function()
         if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end
         ForceTP(name)
-        Notify.new({Title="Teleporting to "..displayName,Content="Successfully teleported!\nEnemies: "..enemyList,Duration=4,Icon=ICON})
+        Notify.new({Title="Teleporting to "..displayName,Content="Successfully teleported!",Duration=4,Icon=ICON})
     end})
 end
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
