@@ -60,9 +60,10 @@ local CurIsland,CurTarget=nil,nil
 local Conns={}
 local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant,LastCanCollide=0,0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
-local ConfLevel=0
-local ATween,TweenOn=nil,false
+local ConfLevel,LastLevelScanTick=0,0
+local ATween,ATweenConn,TweenOn=nil,nil,false
 local TweenTarget=nil
+local HumCache=setmetatable({},{__mode="k"})
 local IslandTPd=false
 local SpawnDone=false
 local LockTarget=nil
@@ -80,7 +81,7 @@ local BossPosCache={}
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
-local function StopTw() if ATween then pcall(function() ATween:Cancel() end) ATween=nil end TweenOn=false TweenTarget=nil end
+local function StopTw() if ATweenConn then pcall(function() ATweenConn:Disconnect() end) ATweenConn=nil end if ATween then pcall(function() ATween:Cancel() end) ATween=nil end TweenOn=false TweenTarget=nil end
 local function DarkenColor(c,f) f=f or 0.55 return Color3.new(math.max(0,c.R*f),math.max(0,c.G*f),math.max(0,c.B*f)) end
 local function BrightenColor(c,f) f=f or 1.5 return Color3.new(math.min(1,c.R*f),math.min(1,c.G*f),math.min(1,c.B*f)) end
 local ButtonBorderStrokes={}
@@ -88,10 +89,16 @@ local function RefreshButtonBorders(bc) for _,s in ipairs(ButtonBorderStrokes) d
 local function ClearTgt() CurTarget=nil LockTarget=nil StopTw() end
 local function GetHum(e)
     if not e then return nil end
+    local cached=HumCache[e]
+    if cached then
+        local ok,alive=pcall(function() return cached.Parent~=nil end)
+        if ok and alive then return cached end
+        HumCache[e]=nil
+    end
     local h=e:FindFirstChildOfClass("Humanoid")
-    if h then return h end
-    for _,d in ipairs(e:GetDescendants()) do if d:IsA("Humanoid") then return d end end
-    return nil
+    if not h then for _,d in ipairs(e:GetDescendants()) do if d:IsA("Humanoid") then h=d break end end end
+    if h then HumCache[e]=h end
+    return h
 end
 local function Root(e)
     if not e then return nil end
@@ -133,7 +140,9 @@ end
 local function GetLevel()
     local lv=0
     pcall(function() local ls=LP:FindFirstChild("leaderstats") if ls then local v=ls:FindFirstChild("Level") or ls:FindFirstChild("Lvl") or ls:FindFirstChild("LVL") if v then lv=tonumber(v.Value) or 0 end end end)
-    if lv>0 then ConfLevel=lv return lv end
+    if lv>0 then ConfLevel=lv LastLevelScanTick=tick() return lv end
+    if ConfLevel>0 and tick()-LastLevelScanTick<3 then return ConfLevel end
+    LastLevelScanTick=tick()
     pcall(function() for _,c in ipairs(LP:GetDescendants()) do if(c:IsA("IntValue") or c:IsA("NumberValue") or c:IsA("StringValue"))then local n=c.Name:lower() if n=="level" or n=="lvl" then local val=tonumber(c.Value) if val and val>lv then lv=val end end end end end)
     if lv>0 then ConfLevel=lv return lv end
     pcall(function() local pg=LP:FindFirstChild("PlayerGui") if pg then for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local m=(d.Text or ""):match("Lv%.%s*(%d[%d,%.]*)" ) if m then m=m:gsub(",","") local val=tonumber(m) if val and val>lv then lv=val end end end end end end)
@@ -430,16 +439,13 @@ local function ScanAllBossTimers()
     local results={}
     local nf=GetNPCFolder()
     if nf then
-        for _,bDef in ipairs(Bosses) do
-            for _,m in ipairs(nf:GetChildren()) do
-                if m:IsA("Model") and m.Name==bDef.Name then
-                    local hm=GetHum(m)
-                    if hm and hm.Health>0 then results[bDef.Name]={alive=true}
-                    else
-                        for _,d in ipairs(m:GetDescendants()) do if d:IsA("TextLabel") then local mn,sc=(d.Text or ""):match("(%d+):(%d+)") if mn and sc then results[bDef.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end
-                        if not results[bDef.Name] then for _,d in ipairs(m:GetDescendants()) do if d:IsA("BillboardGui") then for _,child in ipairs(d:GetDescendants()) do if child:IsA("TextLabel") then local mn,sc=(child.Text or ""):match("(%d+):(%d+)") if mn and sc then results[bDef.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end if results[bDef.Name] then break end end end end
-                    end
-                    break
+        for _,m in ipairs(nf:GetChildren()) do
+            if m:IsA("Model") and AllBossNames[m.Name] and not results[m.Name] then
+                local hm=GetHum(m)
+                if hm and hm.Health>0 then results[m.Name]={alive=true}
+                else
+                    for _,d in ipairs(m:GetDescendants()) do if d:IsA("TextLabel") then local mn,sc=(d.Text or ""):match("(%d+):(%d+)") if mn and sc then results[m.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end
+                    if not results[m.Name] then for _,d in ipairs(m:GetDescendants()) do if d:IsA("BillboardGui") then for _,child in ipairs(d:GetDescendants()) do if child:IsA("TextLabel") then local mn,sc=(child.Text or ""):match("(%d+):(%d+)") if mn and sc then results[m.Name]={m=tonumber(mn),s=tonumber(sc)} break end end end if results[m.Name] then break end end end end
                 end
             end
         end
@@ -511,7 +517,7 @@ local function TweenTo(enemy)
     local cf=CFrame.new(goal,look or goal)
     local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
     ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
-    ATween.Completed:Connect(function() ATween=nil TweenOn=false TweenTarget=nil LockTarget=enemy HoverPos=goal end)
+    ATweenConn=ATween.Completed:Connect(function() ATween=nil ATweenConn=nil TweenOn=false TweenTarget=nil LockTarget=enemy HoverPos=goal end)
     ATween:Play()
     local t=tick()
     while TweenOn and TweenTarget==enemy and tick()-t<dur+0.5 do task.wait(0.05) end
@@ -530,7 +536,7 @@ local function TweenToPoint(goal)
     local cf=CFrame.new(goal,goal+Vector3.new(0,-1,0))
     local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
     ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
-    ATween.Completed:Connect(function() ATween=nil TweenOn=false HoverPos=goal end)
+    ATweenConn=ATween.Completed:Connect(function() ATween=nil ATweenConn=nil TweenOn=false HoverPos=goal end)
     ATween:Play()
     local t=tick()
     while TweenOn and tick()-t<dur+0.5 do task.wait(0.05) end
@@ -644,7 +650,7 @@ local function DoFarmTick()
             elseif not MatchEnemy(CurTarget.Name,CurIsland) then CurTarget=nil LockTarget=nil
             else local cp=ModelPos(CurTarget) if cp and DistTo(cp)>400 then CurTarget=nil LockTarget=nil end end
         end
-        if not CurTarget then CurTarget=NearestFrom(FindEnemies(CurIsland)) end
+        if not CurTarget then CurTarget=NearestFrom(enemies) end
         if CurTarget then TweenTo(CurTarget) Attack(CurTarget) end
     else
         CurTarget=nil LockTarget=nil
