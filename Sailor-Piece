@@ -179,15 +179,18 @@ local function QuestAccept(island) if not island or not island.QuestNPC then ret
 local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" end
 local function QuestCompletionScan()
     if QState~="ACTIVE" then return end
-    if tick()-LastQuestAccept>180 then QState="NONE" return end
-    if tick()-LastQuestAccept<30 then return end
+    if tick()-LastQuestAccept>60 then QState="NONE" return end
+    if tick()-LastQuestAccept<8 then return end
     local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+    local hasQuestUI=false
     for _,d in ipairs(pg:GetDescendants()) do
         if d:IsA("TextLabel") or d:IsA("TextButton") then
             local t=(d.Text or ""):lower()
-            if t:find("quest complet") then QState="NONE" return end
+            if t:find("quest complet") or t:find("abandon") then QState="NONE" return end
+            if t:find("%d+%s*/%s*%d+") or t:find("kill") or t:find("collect") or t:find("objective") or t:find("quest") then hasQuestUI=true end
         end
     end
+    if not hasQuestUI and tick()-LastQuestAccept>20 then QState="NONE" end
 end
 local function ClickYes()
     local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
@@ -222,11 +225,11 @@ local function OpenAllChests()
         else
             pcall(function() useItem:InvokeServer("Use",name,1,false) end)
         end
-        task.wait(0.25)
+        task.wait(0.08)
         ClickYes()
-        task.wait(0.25)
+        task.wait(0.08)
         ClickYes()
-        task.wait(0.15)
+        task.wait(0.05)
     end
 end
 local function BuyMerchantItems()
@@ -238,11 +241,24 @@ local function BuyMerchantItems()
     if not remote then return end
     for _,item in ipairs(MerchantItems) do
         if FM[item] then
+            local bought=0
             for _=1,15 do
                 local ok=false
-                pcall(function() remote:InvokeServer(item,1) ok=true end)
+                local result
+                pcall(function() result=remote:InvokeServer(item,1) ok=true end)
                 if not ok then break end
+                bought=bought+1
                 task.wait(0.1)
+            end
+            if bought>0 then
+                local info="Purchased x"..bought
+                if type(result)=="table" then
+                    if result.stock~=nil then info=info.." | Stock: "..tostring(result.stock) end
+                    if result.price~=nil then info=info.." | Cost: "..tostring(result.price) end
+                elseif type(result)=="number" then
+                    info=info.." | Stock left: "..tostring(result)
+                end
+                Notify.new({Title="Auto Merchant: "..item,Content=info,Duration=4,Icon=ICON})
             end
         end
     end
@@ -776,7 +792,19 @@ UISec:AddButton({Name="Destroy GUI",Callback=function()
     for _,c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
     task.delay(0.15,function()
         pcall(function() Win:Destroy() end)
-        pcall(function() for _,g in ipairs(LP.PlayerGui:GetChildren()) do if g.Name:lower():find("pimple") or g.Name:lower():find("hub") then g:Destroy() end end end)
+        pcall(function()
+            local skip={RobloxGui=true,Chat=true,BubbleChat=true,HealthGui=true,TopbarPlus=true}
+            for _,g in ipairs(LP.PlayerGui:GetChildren()) do
+                if not skip[g.Name] then pcall(function() g:Destroy() end) end
+            end
+        end)
+        pcall(function()
+            local cg=game:GetService("CoreGui")
+            for _,g in ipairs(cg:GetChildren()) do
+                local n=(g.Name or ""):lower()
+                if n:find("pimple") or n:find("hub") or n:find("comp") then pcall(function() g:Destroy() end) end
+            end
+        end)
     end)
 end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
