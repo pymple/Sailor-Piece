@@ -242,17 +242,18 @@ local function OpenAllChests()
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        if not HasChestInInventory(name) then continue end
-        if isEvent then
-            pcall(function() useItem:FireServer("Use",name,999,false) end)
-        else
-            SafeInvoke(useItem,3,"Use",name,999,false)
+        if HasChestInInventory(name) then
+            if isEvent then
+                pcall(function() useItem:FireServer("Use",name,999,false) end)
+            else
+                SafeInvoke(useItem,3,"Use",name,999,false)
+            end
+            task.wait(0.15)
+            ClickYes()
+            task.wait(0.15)
+            ClickYes()
+            task.wait(0.1)
         end
-        task.wait(0.15)
-        ClickYes()
-        task.wait(0.15)
-        ClickYes()
-        task.wait(0.1)
     end
 end
 local function BuyMerchantItems()
@@ -846,23 +847,25 @@ task.spawn(function() while Running do if F.AutoQuest then QuestCompletionScan()
 task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
 task.spawn(function()
     while Running do
-        if not F.AutoFarmLevel then task.wait(0.3) continue end
-        if not IsAlive() then
-            ClearTgt() HoverPos=nil WaitChar() task.wait(0.3)
-            if F.AutoEquip then EquipSword() task.wait(0.2) end
-            if not BossFight then IslandTPd=false SpawnDone=false end
-            LastBossTP=0 BossTPDone=false
-        end
-        if not IsAlive() then task.wait(0.3) continue end
-        if(F.BossEnabled or F.AnosEnabled) and not BossFight then
-            local nextName=PickNextBossName()
-            if nextName then
-                BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 BossCurrentIsland=GetBossIsland(nextName) ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
-                Notify.new({Title="BOSS: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?").." | Stopping farm",Duration=4,Icon=ICON})
+        repeat
+            if not F.AutoFarmLevel then task.wait(0.3) break end
+            if not IsAlive() then
+                ClearTgt() HoverPos=nil WaitChar() task.wait(0.3)
+                if F.AutoEquip then EquipSword() task.wait(0.2) end
+                if not BossFight then IslandTPd=false SpawnDone=false end
+                LastBossTP=0 BossTPDone=false
             end
-        end
-        if BossFight then DoBossTick() task.wait(0.1) continue end
-        DoFarmTick()
-        task.wait(0.1)
+            if not IsAlive() then task.wait(0.3) break end
+            if(F.BossEnabled or F.AnosEnabled) and not BossFight then
+                local nextName=PickNextBossName()
+                if nextName then
+                    BossFight=true BossTargetName=nextName BossTPDone=false LastBossTP=0 BossCurrentIsland=GetBossIsland(nextName) ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                    Notify.new({Title="BOSS: "..GetBossDisplay(nextName),Content="On "..(BossCurrentIsland or "?").." | Stopping farm",Duration=4,Icon=ICON})
+                end
+            end
+            if BossFight then DoBossTick() task.wait(0.1) break end
+            DoFarmTick()
+            task.wait(0.1)
+        until true
     end
 end)
