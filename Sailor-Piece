@@ -48,7 +48,7 @@ local MerchantItems={"Boss Key","Clan Reroll","Dungeon Key","Haki Color Reroll",
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,AutoChest=false,AnosEnabled=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
 local FM={}
@@ -66,6 +66,7 @@ local TweenTarget=nil
 local HumCache=setmetatable({},{__mode="k"})
 local CharHum=nil
 local CachedQuestAbandon=nil
+local CachedUseItem=nil
 local LOOK_DOWN=Vector3.new(0,-1,0)
 local IslandTPd=false
 local SpawnDone=false
@@ -274,19 +275,22 @@ local function OpenAllChests()
     if not F.AutoChest then return end
     if tick()-LastChest<5 then return end
     LastChest=tick()
-    local useItem
-    pcall(function() useItem=WalkPathWait(RS,2,unpack(USE_ITEM_PATH)) end)
+    if not CachedUseItem then
+        pcall(function()
+            local f=RS:FindFirstChild(USE_ITEM_PATH[1])
+            if f then CachedUseItem=f:FindFirstChild(USE_ITEM_PATH[2]) end
+        end)
+        if not CachedUseItem then pcall(function() CachedUseItem=WalkPathWait(RS,1,unpack(USE_ITEM_PATH)) end) end
+    end
+    local useItem=CachedUseItem
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
         if isEvent then
             pcall(function() useItem:FireServer("Use",name,999,false) end)
         else
-            SafeInvoke(useItem,3,"Use",name,999,false)
+            SafeInvoke(useItem,0.5,"Use",name,999,false)
         end
-        task.wait(0.15)
-        SuppressHasItemError()
-        ClickYes()
         task.wait(0.15)
         SuppressHasItemError()
         ClickYes()
@@ -822,12 +826,14 @@ for _,name in ipairs(TpIslands) do
         Notify.new({Title="Teleporting to "..displayName,Content="Successfully teleported!",Duration=4,Icon=ICON})
     end})
 end
-local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
-BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
+local BSec=FTab:DrawSection({Name="Auto Farm Boss",Position="right"})
+BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="Timer-based world bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
 BSec:AddToggle({Name="Anos (Academy)",Flag="AnosEnabled",Default=false,Callback=function(v) F.AnosEnabled=v if not v and BossFight and BossTargetName and IsAnosModel(BossTargetName) then FullReset() end end}).Link:AddHelper({Text="Any difficulty, auto detect"})
 BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
 task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
+local BSummonSec=FTab:DrawSection({Name="Auto Summon Boss",Position="right"})
+BSummonSec:AddToggle({Name="Enable Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v end}).Link:AddHelper({Text="Summon-based bosses — logic coming soon"})
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
 local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
