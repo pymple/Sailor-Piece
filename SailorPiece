@@ -546,7 +546,8 @@ fn.TweenTo=function(enemy)
     local hrp=fn.PlayerHRP() if not hrp then return end
     local d=(hrp.Position-goal).Magnitude
     if d>600 then return end
-    if F.MoveMode=="Teleport" then
+    local inBoss=S.BossFight or S.SummonBossFight
+    if F.MoveMode=="Teleport" and not inBoss then
         fn.StopTw()
         hrp.CFrame=CFrame.new(goal,look or goal)
         S.LockTarget=enemy S.TweenOn=false S.TweenTarget=nil S.HoverPos=goal
@@ -558,7 +559,7 @@ fn.TweenTo=function(enemy)
     if S.TweenOn and S.TweenTarget==enemy then return end
     fn.StopTw() S.TweenOn=true S.TweenTarget=enemy S.LockTarget=nil
     local cf=CFrame.new(goal,look or goal)
-    local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
+    local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,30)
     S.ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
     S.ATweenConn=S.ATween.Completed:Connect(function() S.ATween=nil S.ATweenConn=nil S.TweenOn=false S.TweenTarget=nil S.LockTarget=enemy S.HoverPos=goal end)
     S.ATween:Play()
@@ -567,17 +568,11 @@ fn.TweenTo=function(enemy)
 end
 fn.TweenToPoint=function(goal)
     local hrp=fn.PlayerHRP() if not hrp then return end
-    if F.MoveMode=="Teleport" then
-        fn.StopTw()
-        hrp.CFrame=CFrame.new(goal,goal+Vector3.new(0,-1,0))
-        S.HoverPos=goal
-        return
-    end
     local d=(hrp.Position-goal).Magnitude
-    if d<5 then return end
+    if d<5 then S.HoverPos=goal return end
     fn.StopTw() S.TweenOn=true S.LockTarget=nil
     local cf=CFrame.new(goal,goal+Vector3.new(0,-1,0))
-    local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,8)
+    local dur=math.clamp(d/math.max(F.TweenSpeed,20),0.05,30)
     S.ATween=TweenService:Create(hrp,TweenInfo.new(dur,Enum.EasingStyle.Linear),{CFrame=cf})
     S.ATweenConn=S.ATween.Completed:Connect(function() S.ATween=nil S.ATweenConn=nil S.TweenOn=false S.HoverPos=goal end)
     S.ATween:Play()
@@ -685,8 +680,6 @@ fn.ExitBossMode=function(lastBossName)
         S.CurIsland=farmIsland S.IslandTPd=true S.SpawnDone=true S.LastEnemy=tick()
         if savedHover then
             S.HoverPos=savedHover
-            local hrp=fn.PlayerHRP()
-            if hrp then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
         end
         if F.AutoQuest and S.QState~="ACTIVE" then task.delay(0.15,function() fn.QuestAccept(S.CurIsland) end) end
         S.Notify.new({Title="Bosses Clear!",Content="Already on "..bi..", resuming farm",Duration=3,Icon=S.ICON})
@@ -747,8 +740,9 @@ fn.DoBossTick=function()
         local nextName=fn.PickNextBossName()
         if nextName then
             S.BossTargetName=nextName S.BossTPDone=false S.LastBossTP=0 fn.ClearTgt() S.HoverPos=nil
-            S.BossCurrentIsland=fn.GetBossIsland(nextName)
-            S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(S.BossCurrentIsland or "?"),Duration=3,Icon=S.ICON})
+            local nextBossIsland=fn.GetBossIsland(nextName)
+            if S.BossCurrentIsland~=nextBossIsland then S.BossCurrentIsland=nil end
+            S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(nextBossIsland or "?"),Duration=3,Icon=S.ICON})
         else fn.ExitBossMode(nil) end
         return
     end
@@ -782,9 +776,9 @@ fn.DoBossTick=function()
             end
         end
         local renderPos=fn.GetRenderPos(S.BossTargetName)
-        if renderPos then
-            local hrp=fn.PlayerHRP()
-            if hrp then hrp.CFrame=CFrame.new(renderPos.X,renderPos.Y+F.HeightOffset,renderPos.Z) end
+        if renderPos and fn.DistTo(renderPos)<500 then
+            local rGoal=Vector3.new(renderPos.X,renderPos.Y+F.HeightOffset,renderPos.Z)
+            fn.TweenToPoint(rGoal)
             task.wait(0.5)
         else
             local hrp=fn.PlayerHRP()
@@ -792,7 +786,7 @@ fn.DoBossTick=function()
         end
         for _=1,10 do
             local m=fn.CheckBoss(S.BossTargetName)
-            if m and fn.ModelPos(m) then S.BossTPDone=true return end
+            if m then local mp=fn.ModelPos(m) if mp and fn.DistTo(mp)<500 then S.BossTPDone=true return end end
             task.wait(0.3)
         end
         if not renderPos then
@@ -800,11 +794,17 @@ fn.DoBossTick=function()
             if hrp then fn.TweenToPoint(hrp.Position+Vector3.new(-300,F.HeightOffset,-300)) task.wait(0.3) end
             for _=1,6 do
                 local m=fn.CheckBoss(S.BossTargetName)
-                if m and fn.ModelPos(m) then S.BossTPDone=true return end
+                if m then local mp=fn.ModelPos(m) if mp and fn.DistTo(mp)<500 then S.BossTPDone=true return end end
                 task.wait(0.3)
             end
         end
         local m3=fn.CheckBoss(S.BossTargetName)
+        local m3Close=m3 and fn.ModelPos(m3) and fn.DistTo(fn.ModelPos(m3))<500
+        if m3 and not m3Close then
+            -- Boss exists but is far away (wrong island?) — re-portal
+            S.BossCurrentIsland=nil S.LastBossTP=0
+            return
+        end
         if not m3 then
             local deadName=S.BossTargetName
             S.BossKills=S.BossKills+1 S.Kills=S.Kills+1 S.KillCount=S.KillCount+1 fn.RecordBossDeath(deadName)
@@ -817,10 +817,8 @@ fn.DoBossTick=function()
                 local nextIsland=fn.GetBossIsland(nextName)
                 if nextIsland==S.BossCurrentIsland then
                     S.BossTPDone=true
-                    S.HoverPos=nil
-                    local hrp=fn.PlayerHRP()
-                    if hrp and savedHover then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
-                else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland S.HoverPos=nil end
+                    S.HoverPos=savedHover
+                else S.BossTPDone=false S.LastBossTP=0 S.HoverPos=nil end
                 S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(nextIsland or "?"),Duration=3,Icon=S.ICON})
             else fn.ExitBossMode(deadName) end
         else S.BossTPDone=true end
@@ -839,21 +837,15 @@ fn.DoBossTick=function()
             if hrp then savedHover=Vector3.new(hrp.Position.X,hrp.Position.Y+F.HeightOffset,hrp.Position.Z) end
         end
         S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() task.wait(0.15)
-        if savedHover then
-            S.HoverPos=savedHover
-            local hrp=fn.PlayerHRP()
-            if hrp then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
-        end
+        S.HoverPos=savedHover
         local nextName=fn.PickNextBossName()
         if nextName then
             S.BossTargetName=nextName
             local nextIsland=fn.GetBossIsland(nextName)
             if nextIsland==S.BossCurrentIsland then
                 S.BossTPDone=true
-                S.HoverPos=nil
-                local hrp=fn.PlayerHRP()
-                if hrp and savedHover then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
-            else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland S.HoverPos=nil end
+                S.HoverPos=savedHover
+            else S.BossTPDone=false S.LastBossTP=0 S.HoverPos=nil end
             S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(nextIsland or "?"),Duration=3,Icon=S.ICON})
         else fn.ExitBossMode(deadName) end
         return
@@ -961,6 +953,7 @@ end
 fn.ExitSummonBossMode=function()
     S.SummonBossFight=false S.SummonBossTarget=nil S.SummonBossTPDone=false S.LastSummonBossTP=0 S.SummonBossCommitted={} S.SummonBossCurrentIsland=nil S.SummonBossOrder=0 S.SummonBossFailCount={} S.SummonBossFireTime={}
     fn.ClearTgt() S.HoverPos=nil
+    S.CurIsland=nil S.IslandTPd=false S.SpawnDone=false S.LastEnemy=0
 end
 fn.SummonBossPosValid=function(model)
     local p=fn.ModelPos(model)
@@ -1361,8 +1354,8 @@ task.spawn(function()
                 if nextName then
                     local bossIsland=fn.GetBossIsland(nextName)
                     local alreadyOnIsland=S.CurIsland and bossIsland and S.CurIsland.Portal==bossIsland and S.IslandTPd
-                    S.BossFight=true S.BossTargetName=nextName S.BossTPDone=alreadyOnIsland S.LastBossTP=0 S.BossCurrentIsland=bossIsland fn.ClearTgt() S.HoverPos=nil
-                    if not alreadyOnIsland then S.CurIsland=nil S.IslandTPd=false end
+                    S.BossFight=true S.BossTargetName=nextName S.BossTPDone=alreadyOnIsland S.LastBossTP=0 fn.ClearTgt() S.HoverPos=nil
+                    if alreadyOnIsland then S.BossCurrentIsland=bossIsland else S.BossCurrentIsland=nil S.CurIsland=nil S.IslandTPd=false end
                     S.Notify.new({Title="BOSS: "..fn.GetBossDisplay(nextName),Content="On "..(S.BossCurrentIsland or "?")..(alreadyOnIsland and " (same island)" or " | Stopping farm"),Duration=4,Icon=S.ICON})
                 end
             end
