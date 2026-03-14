@@ -790,22 +790,7 @@ UISec:AddButton({Name="Destroy GUI",Callback=function()
     Running=false
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
     for _,c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
-    task.delay(0.15,function()
-        pcall(function() Win:Destroy() end)
-        pcall(function()
-            local skip={RobloxGui=true,Chat=true,BubbleChat=true,HealthGui=true,TopbarPlus=true}
-            for _,g in ipairs(LP.PlayerGui:GetChildren()) do
-                if not skip[g.Name] then pcall(function() g:Destroy() end) end
-            end
-        end)
-        pcall(function()
-            local cg=game:GetService("CoreGui")
-            for _,g in ipairs(cg:GetChildren()) do
-                local n=(g.Name or ""):lower()
-                if n:find("pimple") or n:find("hub") or n:find("comp") then pcall(function() g:Destroy() end) end
-            end
-        end)
-    end)
+    task.delay(0.15,function() pcall(function() Win:Destroy() end) end)
 end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
 InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nGojo: renders via Yuji's cached position\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
