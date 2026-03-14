@@ -1,4 +1,5 @@
 
+
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
@@ -19,7 +20,6 @@ local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
 local SETTINGS_TOGGLE_PATH={"RemoteEvents","SettingsToggle"}
 local QUEST_REPEAT_PATH={"RemoteEvents","QuestRepeat"}
 local SUMMON_BOSS_PATH={"Remotes","RequestSummonBoss"}
-local AUTO_SPAWN_BOSS_PATH={"Remotes","RequestAutoSpawn"}
 local BOSS_ISLAND_PORTAL="Boss"
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
@@ -100,7 +100,6 @@ local SummonBossFight=false
 local SummonBossTarget=nil
 local SummonBossTPDone=false
 local LastSummonBossTP=0
-local SummonAutoSpawnFired={}
 local SummonBossCommitted={}
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
@@ -201,7 +200,7 @@ local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     AbandonAllQuests()
     LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={} SummonBossCommitted={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={}
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -812,14 +811,6 @@ local function FireSummonBoss(name)
         if diff then r:FireServer(name,diff) else r:FireServer(name) end
     end)
 end
-local function FireAutoSpawnBoss(name)
-    local diff=GetSummonBossDiff(name)
-    pcall(function()
-        local r=WalkPathWait(RS,2,unpack(AUTO_SPAWN_BOSS_PATH))
-        if not r then return end
-        if diff then r:FireServer(name,diff) else r:FireServer(name) end
-    end)
-end
 local function CheckSummonBoss(name)
     local nf=GetNPCFolder() if not nf then return nil end
     for _,m in ipairs(nf:GetChildren()) do
@@ -838,7 +829,7 @@ local function PickNextSummonBoss()
     return nil
 end
 local function ExitSummonBossMode()
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={} SummonBossCommitted={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={}
     ClearTgt() HoverPos=nil
 end
 local function DoSummonBossTick()
@@ -846,13 +837,10 @@ local function DoSummonBossTick()
         if tick()-LastSummonBossTP<4 then task.wait(0.2) return end
         LastSummonBossTP=tick()
         Notify.new({Title="Summon Boss",Content="Teleporting to Boss Island",Duration=2,Icon=ICON})
+        StopTw() HoverPos=nil ClearTgt()
         ForceTP(BOSS_ISLAND_PORTAL)
         task.wait(1.5)
-        for _,b in ipairs(SummonBosses) do
-            if BSF[b.Name] and not SummonAutoSpawnFired[b.Name] then
-                FireAutoSpawnBoss(b.Name) SummonAutoSpawnFired[b.Name]=true task.wait(0.1)
-            end
-        end
+        local _hrp=PlayerHRP() if _hrp then HoverPos=_hrp.Position end
         for _,b in ipairs(SummonBosses) do
             if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
         end
@@ -877,11 +865,12 @@ local function DoSummonBossTick()
         BossKills=BossKills+1 Kills=Kills+1
         Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
-        SummonAutoSpawnFired[deadName]=nil
-        SummonBossTPDone=false LastSummonBossTP=0
-        SummonBossTarget=nil ClearTgt() HoverPos=nil
+        SummonBossTarget=nil ClearTgt()
+        if BSF[deadName] then FireSummonBoss(deadName) SummonBossCommitted[deadName]=true end
         return
     end
+    local bossPos=ModelPos(model)
+    if not bossPos or bossPos.Y < -100 then task.wait(0.2) return end
     CurTarget=model
     TweenTo(model)
     Attack(model)
@@ -957,7 +946,7 @@ for _,bDef in ipairs(SummonBosses) do
     if bDef.Difficulties then
         local diffFlag="Diff_"..bDef.Name
         local diffKey=bDef.Name=="GilgameshBoss" and "GilgameshDiff" or "BlessedMaidenDiff"
-        BSummonSec:AddDropdown({Name=bDef.Display.." Difficulty",Default="Normal",Values=bDef.Difficulties,Flag=diffFlag,Callback=function(v) F[diffKey]=v SummonAutoSpawnFired[bDef.Name]=nil end}).Link:AddHelper({Text="Normal/Medium/Hard/Extreme"})
+        BSummonSec:AddDropdown({Name=bDef.Display.." Difficulty",Default="Normal",Values=bDef.Difficulties,Flag=diffFlag,Callback=function(v) F[diffKey]=v end}).Link:AddHelper({Text="Normal/Medium/Hard/Extreme"})
     end
 end
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
