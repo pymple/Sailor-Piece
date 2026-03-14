@@ -98,7 +98,7 @@ S.LockTarget=nil S.HoverPos=nil
 S.QState="NONE"
 S.BossFight=false S.BossTargetName=nil
 S.BossDeathTimes={} S.BossInfoP=nil S.BossTimerCache={}
-S.BossTPDone=false S.LastBossTP=0
+S.BossTPDone=false S.LastBossTP=0 S.BossTPRetries=0
 S.BossCurrentIsland=nil S.BossPosCache={}
 S.SummonBossFight=false S.SummonBossTarget=nil
 S.SummonBossTPDone=false S.LastSummonBossTP=0
@@ -210,7 +210,7 @@ end
 fn.FullReset=function()
     fn.ClearTgt() S.HoverPos=nil S.CurIsland=nil S.IslandTPd=false S.SpawnDone=false S.LastEnemy=0 S.LastTP=0 S.TPCount=0
     fn.AbandonAllQuests()
-    S.LastQuestAccept=0 S.BossTargetName=nil S.BossFight=false S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nil
+    S.LastQuestAccept=0 S.BossTargetName=nil S.BossFight=false S.BossTPDone=false S.LastBossTP=0 S.BossTPRetries=0 S.BossCurrentIsland=nil
     S.SummonBossFight=false S.SummonBossTarget=nil S.SummonBossTPDone=false S.LastSummonBossTP=0 S.SummonBossCommitted={} S.SummonBossCurrentIsland=nil S.SummonBossOrder=0 S.SummonBossFailCount={}
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
@@ -569,6 +569,7 @@ end
 fn.TweenToPoint=function(goal)
     local hrp=fn.PlayerHRP() if not hrp then return end
     local d=(hrp.Position-goal).Magnitude
+    if d>500 then return end
     if d<5 then S.HoverPos=goal return end
     fn.StopTw() S.TweenOn=true S.LockTarget=nil
     local cf=CFrame.new(goal,goal+Vector3.new(0,-1,0))
@@ -673,7 +674,7 @@ end))
 fn.ExitBossMode=function(lastBossName)
     local bi=lastBossName and fn.GetBossIsland(lastBossName)
     local savedHover=S.HoverPos
-    S.BossFight=false S.BossTargetName=nil S.BossTPDone=false S.BossCurrentIsland=nil fn.ClearTgt() S.HoverPos=nil S.LastBossTP=0
+    S.BossFight=false S.BossTargetName=nil S.BossTPDone=false S.BossCurrentIsland=nil fn.ClearTgt() S.HoverPos=nil S.LastBossTP=0 S.BossTPRetries=0
     S.LastEnemy=0 S.LastTP=0
     local farmIsland=fn.GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
@@ -752,7 +753,7 @@ fn.DoBossTick=function()
         local model=fn.CheckBoss(S.BossTargetName)
         if model then
             local bp=fn.ModelPos(model)
-            if bp and fn.DistTo(bp)<300 then S.BossTPDone=true S.BossCurrentIsland=bi return end
+            if bp and fn.DistTo(bp)<300 then S.BossTPDone=true S.BossCurrentIsland=bi S.BossTPRetries=0 return end
         end
         if tick()-S.LastBossTP<4 then task.wait(0.2) return end
         fn.ClearTgt() S.HoverPos=nil S.LastBossTP=tick()
@@ -771,7 +772,7 @@ fn.DoBossTick=function()
             if bp2 and fn.DistTo(bp2)<500 then
                 local goal=Vector3.new(bp2.X,bp2.Y+F.HeightOffset,bp2.Z)
                 fn.TweenToPoint(goal)
-                S.BossTPDone=true
+                S.BossTPDone=true S.BossTPRetries=0
                 return
             end
         end
@@ -786,7 +787,7 @@ fn.DoBossTick=function()
         end
         for _=1,10 do
             local m=fn.CheckBoss(S.BossTargetName)
-            if m then local mp=fn.ModelPos(m) if mp and fn.DistTo(mp)<500 then S.BossTPDone=true return end end
+            if m then local mp=fn.ModelPos(m) if mp and fn.DistTo(mp)<500 then S.BossTPDone=true S.BossTPRetries=0 return end end
             task.wait(0.3)
         end
         if not renderPos then
@@ -794,34 +795,36 @@ fn.DoBossTick=function()
             if hrp then fn.TweenToPoint(hrp.Position+Vector3.new(-300,F.HeightOffset,-300)) task.wait(0.3) end
             for _=1,6 do
                 local m=fn.CheckBoss(S.BossTargetName)
-                if m then local mp=fn.ModelPos(m) if mp and fn.DistTo(mp)<500 then S.BossTPDone=true return end end
+                if m then local mp=fn.ModelPos(m) if mp and fn.DistTo(mp)<500 then S.BossTPDone=true S.BossTPRetries=0 return end end
                 task.wait(0.3)
             end
         end
         local m3=fn.CheckBoss(S.BossTargetName)
         local m3Close=m3 and fn.ModelPos(m3) and fn.DistTo(fn.ModelPos(m3))<500
         if m3 and not m3Close then
-            -- Boss exists but is far away (wrong island?) — re-portal
-            S.BossCurrentIsland=nil S.LastBossTP=0
+            S.BossCurrentIsland=nil S.LastBossTP=0 S.BossTPRetries=0
             return
         end
         if not m3 then
-            local deadName=S.BossTargetName
-            S.BossKills=S.BossKills+1 S.Kills=S.Kills+1 S.KillCount=S.KillCount+1 fn.RecordBossDeath(deadName)
-            S.Notify.new({Title="Killed "..fn.GetBossDisplay(deadName),Content="Successfully killed "..fn.GetBossDisplay(deadName),Duration=4,Icon=S.ICON})
-            local savedHover=S.HoverPos
-            S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() task.wait(0.15)
+            S.BossTPRetries=(S.BossTPRetries or 0)+1
+            if S.BossTPRetries<3 then
+                S.Notify.new({Title="Retrying TP",Content=fn.GetBossDisplay(S.BossTargetName).." not found ("..S.BossTPRetries.."/3)",Duration=2,Icon=S.ICON})
+                S.BossCurrentIsland=nil S.LastBossTP=0
+                return
+            end
+            S.BossTPRetries=0
+            S.Notify.new({Title="Skipping "..fn.GetBossDisplay(S.BossTargetName),Content="Not found after 3 TP attempts",Duration=3,Icon=S.ICON})
+            local skippedName=S.BossTargetName
+            S.BossTargetName=nil S.BossTPDone=false fn.ClearTgt() S.HoverPos=nil task.wait(0.15)
             local nextName=fn.PickNextBossName()
             if nextName then
                 S.BossTargetName=nextName
                 local nextIsland=fn.GetBossIsland(nextName)
-                if nextIsland==S.BossCurrentIsland then
-                    S.BossTPDone=true
-                    S.HoverPos=savedHover
+                if nextIsland==S.BossCurrentIsland then S.BossTPDone=true
                 else S.BossTPDone=false S.LastBossTP=0 S.HoverPos=nil end
                 S.Notify.new({Title="Next: "..fn.GetBossDisplay(nextName),Content="On "..fn.PortalDisplayName(nextIsland or "?"),Duration=3,Icon=S.ICON})
-            else fn.ExitBossMode(deadName) end
-        else S.BossTPDone=true end
+            else fn.ExitBossMode(skippedName) end
+        else S.BossTPDone=true S.BossTPRetries=0 end
         return
     end
     local model=fn.CheckBoss(S.BossTargetName)
@@ -1173,6 +1176,11 @@ fn.DoSummonBossTick=function()
     end
     local bossPos=fn.ModelPos(model)
     if not bossPos or bossPos.Y<-30 then task.wait(0.15) return end
+    if fn.DistTo(bossPos)>500 then
+        S.SummonBossTPDone=false S.LastSummonBossTP=0
+        fn.ClearTgt()
+        return
+    end
     S.CurTarget=model
     fn.TweenTo(model)
     fn.Attack(model)
