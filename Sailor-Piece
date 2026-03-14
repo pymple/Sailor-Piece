@@ -78,6 +78,7 @@ local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
 local function StopTw() if ATween then pcall(function() ATween:Cancel() end) ATween=nil end TweenOn=false TweenTarget=nil end
 local function DarkenColor(c,f) f=f or 0.55 return Color3.new(math.max(0,c.R*f),math.max(0,c.G*f),math.max(0,c.B*f)) end
+local function BrightenColor(c,f) f=f or 1.5 return Color3.new(math.min(1,c.R*f),math.min(1,c.G*f),math.min(1,c.B*f)) end
 local ButtonBorderStrokes={}
 local function RefreshButtonBorders(bc) for _,s in ipairs(ButtonBorderStrokes) do pcall(function() if s and s.Parent then s.Color=bc end end) end end
 local function ClearTgt() CurTarget=nil LockTarget=nil StopTw() end
@@ -167,7 +168,18 @@ local function ForceTP(portal)
 end
 local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
 local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" end
-local function QuestScanBusy() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("finish your current") or t:find("already have a quest") then return true end end end return false end
+local function QuestCompletionScan()
+    if QState~="ACTIVE" then return end
+    if tick()-LastQuestAccept>180 then QState="NONE" return end
+    if tick()-LastQuestAccept<30 then return end
+    local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
+    for _,d in ipairs(pg:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            local t=(d.Text or ""):lower()
+            if t:find("quest complet") then QState="NONE" return end
+        end
+    end
+end
 local function ClickYes()
     local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
     for _,desc in ipairs(pg:GetDescendants()) do
@@ -182,10 +194,10 @@ local function ClickYes()
     end
 end
 local function PlayerHasChest(name)
-    for _,v in ipairs(LP:GetDescendants()) do if v.Name==name and(v:IsA("IntValue") or v:IsA("NumberValue")) and(v.Value or 0)>0 then return true end end
-    if LP.Backpack:FindFirstChild(name) then return true end
-    local c=LP.Character if c and c:FindFirstChild(name) then return true end
-    return false
+    local found=LP:FindFirstChild(name,true)
+    if not found then return false end
+    if found:IsA("IntValue") or found:IsA("NumberValue") then return(tonumber(found.Value) or 0)>0 end
+    return true
 end
 local function OpenAllChests()
     if not F.AutoChest then return end
@@ -560,9 +572,8 @@ local function DoFarmTick()
         else task.wait(1) end
         return
     end
-    if F.AutoQuest then
-        if QState=="NONE" then if tick()-LastQuestAccept>30 then QuestAccept(CurIsland) end
-        elseif QState=="ACTIVE" then if tick()-LastQuestAccept>60 then QState="NONE" end end
+    if F.AutoQuest and QState=="NONE" then
+        if tick()-LastQuestAccept>5 then QuestAccept(CurIsland) end
     end
     local enemies=FindEnemies(CurIsland)
     if #enemies>0 then
@@ -740,8 +751,8 @@ local SetTab=Win:DrawTab({Name="Settings",Icon="settings-3",Type="Single",Enable
 local ThTab=Win:DrawTab({Name="Themes",Icon="paintbrush",Type="Single"})
 local UISec=SetTab:DrawSection({Name="UI Settings",Position="left"})
 UISec:AddToggle({Name="Always Show Frame",Default=false,Callback=function(v) Win.AlwayShowTab=v end})
-UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
-UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v RefreshButtonBorders(BrightenColor(v)) Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v RefreshButtonBorders(BrightenColor(v)) Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Drop Color",Default=Hub.Colors.DropColor,Callback=function(v) Hub.Colors.DropColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Block Color",Default=Hub.Colors.BlockColor,Callback=function(v) Hub.Colors.BlockColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Background Color",Default=Hub.Colors.BGDBColor,Callback=function(v) Hub.Colors.BGDBColor=v Hub:RefreshCurrentColor() end})
@@ -767,7 +778,7 @@ task.defer(function()
         local hubGui
         for _,ch in ipairs(LP.PlayerGui:GetChildren()) do if ch:IsA("ScreenGui") and ch.Name:find("PIMPLE") then hubGui=ch break end end
         if not hubGui then return end
-        local bc=DarkenColor(Hub.Colors.Toggle)
+        local bc=BrightenColor(Hub.Colors.Toggle)
         for _,d in ipairs(hubGui:GetDescendants()) do
             if (d:IsA("TextButton") or d:IsA("ImageButton") or d:IsA("Frame")) and d:FindFirstChildOfClass("UICorner") then
                 local s=d:FindFirstChildOfClass("UIStroke")
@@ -781,7 +792,7 @@ end)
 Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
 SetupAntiAFK()
 task.spawn(DisableGameAutoSkills)
-task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and not BossFight then if QuestScanBusy() then QState="ACTIVE" LastQuestAccept=tick() end end task.wait(0.5) end end)
+task.spawn(function() while Running do if F.AutoQuest then QuestCompletionScan() end task.wait(2) end end)
 task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
 task.spawn(function()
     while Running do
