@@ -10,18 +10,20 @@ local LP=Players.LocalPlayer
 local ICON="rbxthumb://type=AvatarHeadShot&id=583572860&w=420&h=420"
 local DISCORD="https://discord.gg/B3PurfCy"
 local NPC_FOLDER="NPCs"
-local TP_REMOTE_PATH={"Remotes","TeleportToPortal"}
-local QUEST_ACCEPT_PATH={"RemoteEvents","QuestAccept"}
-local QUEST_ABANDON_PATH={"RemoteEvents","QuestAbandon"}
-local USE_ITEM_PATH={"Remotes","UseItem"}
-local COMBAT_HIT_PATH={"CombatSystem","Remotes","RequestHit"}
-local ABILITY_PATH={"AbilitySystem","Remotes","RequestAbility"}
-local MERCHANT_REMOTE_PATH={"Remotes","MerchantRemotes","PurchaseMerchantItem"}
-local SETTINGS_TOGGLE_PATH={"RemoteEvents","SettingsToggle"}
-local QUEST_REPEAT_PATH={"RemoteEvents","QuestRepeat"}
-local SUMMON_BOSS_PATH={"Remotes","RequestSummonBoss"}
-local ANOS_BOSS_PATH={"Remotes","RequestSpawnAnosBoss"}
 local BOSS_ISLAND_PORTAL="Boss"
+local R={
+TP={"Remotes","TeleportToPortal"},
+QuestAccept={"RemoteEvents","QuestAccept"},
+QuestAbandon={"RemoteEvents","QuestAbandon"},
+UseItem={"Remotes","UseItem"},
+Hit={"CombatSystem","Remotes","RequestHit"},
+Ability={"AbilitySystem","Remotes","RequestAbility"},
+Merchant={"Remotes","MerchantRemotes","PurchaseMerchantItem"},
+Settings={"RemoteEvents","SettingsToggle"},
+QuestRepeat={"RemoteEvents","QuestRepeat"},
+SummonBoss={"Remotes","RequestSummonBoss"},
+AnosBoss={"Remotes","RequestSpawnAnosBoss"},
+}
 local Islands={
     {Portal="Starter",FarmUntil=250,Enemies={"Thief"},QuestNPC="QuestNPC1"},
     {Portal="Jungle",FarmUntil=750,Enemies={"Monkey"},QuestNPC="QuestNPC3"},
@@ -60,7 +62,7 @@ local MerchantItems={"Boss Key","Clan Reroll","Dungeon Key","Haki Color Reroll",
 local ANOS_ISLAND="Academy"
 local BossIsland,AllBossNames,BossDisplay,BossRenderNear={},{},{},{}
 for _,b in ipairs(Bosses) do BossIsland[b.Name]=b.Island AllBossNames[b.Name]=true BossDisplay[b.Name]=b.Display if b.RenderNear then BossRenderNear[b.Name]=b.RenderNear end end
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AnosDiff="Normal",AutoChest=false,FarmMode="Plank",MoveMode="Tween",BehindDist=5,AutoMerchant=false,MerchNotify=true}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AnosDiff="Normal",AutoChest=false,FarmMode="Plank",MoveMode="Tween",OffsetDist=5,AutoMerchant=false,MerchNotify=true}
 local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
 local BSF={}
@@ -188,10 +190,10 @@ local function AbandonAllQuests()
     QState="NONE"
     if not CachedQuestAbandon then
         pcall(function()
-            local f=RS:FindFirstChild(QUEST_ABANDON_PATH[1])
-            if f then CachedQuestAbandon=f:FindFirstChild(QUEST_ABANDON_PATH[2]) end
+            local f=RS:FindFirstChild(R.QuestAbandon[1])
+            if f then CachedQuestAbandon=f:FindFirstChild(R.QuestAbandon[2]) end
         end)
-        if not CachedQuestAbandon then pcall(function() CachedQuestAbandon=WalkPathWait(RS,1,unpack(QUEST_ABANDON_PATH)) end) end
+        if not CachedQuestAbandon then pcall(function() CachedQuestAbandon=WalkPathWait(RS,1,unpack(R.QuestAbandon)) end) end
     end
     local ab=CachedQuestAbandon
     if ab then
@@ -213,27 +215,27 @@ local function DoTP(portal)
     if TPCount>=10 then return false end
     LastTP=tick() TPCount=TPCount+1
     local ok=false
-    pcall(function() WalkPathWait(RS,3,unpack(TP_REMOTE_PATH)):FireServer(portal) ok=true end)
+    pcall(function() WalkPathWait(RS,3,unpack(R.TP)):FireServer(portal) ok=true end)
     return ok
 end
 local function ForceTP(portal)
     LastTP=0 TPCount=0 TPReset=tick()
     local ok=false
-    pcall(function() WalkPathWait(RS,3,unpack(TP_REMOTE_PATH)):FireServer(portal) ok=true end)
+    pcall(function() WalkPathWait(RS,3,unpack(R.TP)):FireServer(portal) ok=true end)
     LastTP=tick() TPCount=1
     return ok
 end
 local function EnableGameQuestRepeat()
     pcall(function()
-        local r=WalkPathWait(RS,3,unpack(SETTINGS_TOGGLE_PATH))
+        local r=WalkPathWait(RS,3,unpack(R.Settings))
         if not r then return end
         r:FireServer("EnableQuestRepeat",true)
         task.wait(0.05)
         r:FireServer("AutoQuestRepeat",true)
     end)
 end
-local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" task.spawn(EnableGameQuestRepeat) end
-local function QuestRepeatFire(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_REPEAT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
+local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(R.QuestAccept)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" task.spawn(EnableGameQuestRepeat) end
+local function QuestRepeatFire(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(R.QuestRepeat)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
 local function QuestAbandon() AbandonAllQuests() end
 local function QuestCompletionScan()
     if QState~="ACTIVE" then return end
@@ -301,10 +303,10 @@ local function OpenAllChests()
     LastChest=tick()
     if not CachedUseItem then
         pcall(function()
-            local f=RS:FindFirstChild(USE_ITEM_PATH[1])
-            if f then CachedUseItem=f:FindFirstChild(USE_ITEM_PATH[2]) end
+            local f=RS:FindFirstChild(R.UseItem[1])
+            if f then CachedUseItem=f:FindFirstChild(R.UseItem[2]) end
         end)
-        if not CachedUseItem then pcall(function() CachedUseItem=WalkPathWait(RS,1,unpack(USE_ITEM_PATH)) end) end
+        if not CachedUseItem then pcall(function() CachedUseItem=WalkPathWait(RS,1,unpack(R.UseItem)) end) end
     end
     local useItem=CachedUseItem
     if not useItem then return end
@@ -315,18 +317,18 @@ local function OpenAllChests()
         else
             SafeInvoke(useItem,0.5,"Use",name,999,false)
         end
-        task.wait(0.15)
-        SuppressHasItemError()
-        ClickYes()
-        task.wait(0.1)
+        task.wait(0.3)
     end
+    task.wait(0.2)
+    ClickYes()
+    SuppressHasItemError()
 end
 local function BuyMerchantItems()
     if not F.AutoMerchant then return end
     if tick()-LastMerchant<1800 then return end
     LastMerchant=tick()
     local remote
-    pcall(function() remote=WalkPathWait(RS,2,unpack(MERCHANT_REMOTE_PATH)) end)
+    pcall(function() remote=WalkPathWait(RS,2,unpack(R.Merchant)) end)
     if not remote then return end
     for _,item in ipairs(MerchantItems) do
         if FM[item] then
@@ -519,7 +521,7 @@ local function GetGoalForEnemy(enemy)
     if F.FarmMode=="Behind" then
         local ecf=ModelCF(enemy)
         if ecf then
-            local behind=ecf.Position-ecf.LookVector*F.BehindDist
+            local behind=ecf.Position-ecf.LookVector*F.OffsetDist
             return Vector3.new(behind.X,behind.Y+1,behind.Z),ecf.Position
         end
         return Vector3.new(pos.X,pos.Y+1,pos.Z),pos
@@ -573,7 +575,7 @@ local function FireAbilities()
     if not(F.SkillZ or F.SkillX or F.SkillC or F.SkillV or F.SkillB) then return end
     LastSkill=tick()
     pcall(function()
-        local r=WalkPathWait(RS,2,unpack(ABILITY_PATH))
+        local r=WalkPathWait(RS,2,unpack(R.Ability))
         if F.SkillZ then pcall(function() r:FireServer(1) end) end
         if F.SkillX then pcall(function() r:FireServer(2) end) end
         if F.SkillC then pcall(function() r:FireServer(3) end) end
@@ -583,7 +585,7 @@ local function FireAbilities()
 end
 local function Attack(tgt)
     local tr=Root(tgt)
-    pcall(function() WalkPathWait(RS,2,unpack(COMBAT_HIT_PATH)):FireServer(tgt) end)
+    pcall(function() WalkPathWait(RS,2,unpack(R.Hit)):FireServer(tgt) end)
     local tool=GetTool()
     if tool then
         pcall(function() tool:Activate() end)
@@ -811,12 +813,12 @@ local function FireSummonBoss(name)
     if not BSF[name] then return end
     pcall(function()
         if name=="AnosBoss" then
-            local r=WalkPathWait(RS,2,unpack(ANOS_BOSS_PATH))
+            local r=WalkPathWait(RS,2,unpack(R.AnosBoss))
             if not r then return end
             local diff=GetSummonBossDiff(name) or "Normal"
             r:FireServer("Anos",diff)
         else
-            local r=WalkPathWait(RS,2,unpack(SUMMON_BOSS_PATH))
+            local r=WalkPathWait(RS,2,unpack(R.SummonBoss))
             if not r then return end
             local diff=GetSummonBossDiff(name)
             if diff then r:FireServer(name,diff) else r:FireServer(name) end
@@ -1048,7 +1050,7 @@ local function DoSummonBossTick()
 end
 local function DisableGameAutoSkills()
     pcall(function()
-        local r=WalkPathWait(RS,3,unpack(SETTINGS_TOGGLE_PATH))
+        local r=WalkPathWait(RS,3,unpack(R.Settings))
         if not r then return end
         for _,skill in ipairs({"AutoSkillZ","AutoSkillX","AutoSkillC","AutoSkillV","AutoSkillF"}) do
             pcall(function() r:FireServer(skill,false) end) task.wait(0.05)
@@ -1084,7 +1086,7 @@ FSec:AddDropdown({Name="Island",Default="Auto",Values=GetIslandNames(),Flag="Sel
 FSec:AddDropdown({Name="Farm Style",Default="Plank",Values={"Plank","Behind"},Flag="FarmMode",Callback=function(v) F.FarmMode=v ClearTgt() HoverPos=nil if v~="Plank" then pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end) end end}).Link:AddHelper({Text="Plank = hover above | Behind = stand behind"})
 FSec:AddDropdown({Name="Move Mode",Default="Tween",Values={"Tween","Teleport"},Flag="MoveMode",Callback=function(v) F.MoveMode=v ClearTgt() HoverPos=nil end}).Link:AddHelper({Text="Tween = smooth | Teleport = instant"})
 FSec:AddSlider({Name="Height (Plank)",Min=5,Max=40,Default=10,Round=0,Flag="HeightOffset",Callback=function(v) F.HeightOffset=v end})
-FSec:AddSlider({Name="Behind Dist",Min=2,Max=15,Default=5,Round=0,Flag="BehindDist",Callback=function(v) F.BehindDist=v end})
+FSec:AddSlider({Name="Offset Distance",Min=2,Max=15,Default=5,Round=0,Flag="OffsetDist",Callback=function(v) F.OffsetDist=v end})
 FSec:AddSlider({Name="Tween Speed",Min=20,Max=500,Default=100,Round=0,Flag="TweenSpeed",Callback=function(v) F.TweenSpeed=v end})
 FSec:AddButton({Name="Scan All NPCs",Callback=function()
     local isl=CurIsland or IslandForLevel(GetLevel())
@@ -1123,11 +1125,7 @@ for _,bDef in ipairs(SummonBosses) do
     end
 end
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
-CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
-local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
-MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v if v then LastMerchant=0 end end}).Link:AddHelper({Text="Buys all selected items in one go; 30 min restock"})
-MSec:AddToggle({Name="Merchant Notifier",Flag="MerchNotify",Default=true,Callback=function(v) F.MerchNotify=v end}).Link:AddHelper({Text="Shows notification when items are purchased"})
-for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
+CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests in batch"})
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
 SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
 SSec:AddToggle({Name="Skill X",Flag="SkillX",Default=false,Callback=function(v) F.SkillX=v end}).Link:AddHelper({Text="Auto use"})
@@ -1135,6 +1133,10 @@ SSec:AddToggle({Name="Skill C",Flag="SkillC",Default=false,Callback=function(v) 
 SSec:AddToggle({Name="Skill V",Flag="SkillV",Default=false,Callback=function(v) F.SkillV=v end}).Link:AddHelper({Text="Auto use"})
 SSec:AddToggle({Name="Skill B",Flag="SkillB",Default=false,Callback=function(v) F.SkillB=v end}).Link:AddHelper({Text="Auto use"})
 SSec:AddSlider({Name="Skill Cooldown",Min=0.3,Max=5,Default=1.0,Round=1,Flag="SkillCooldown",Callback=function(v) F.SkillCooldown=v end})
+local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
+MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v if v then LastMerchant=0 end end}).Link:AddHelper({Text="Buys all selected items in one go; 30 min restock"})
+MSec:AddToggle({Name="Merchant Notifier",Flag="MerchNotify",Default=true,Callback=function(v) F.MerchNotify=v end}).Link:AddHelper({Text="Shows notification when items are purchased"})
+for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
 Win:DrawCategory({Name="SETTINGS"})
 local SetTab=Win:DrawTab({Name="Settings",Icon="settings-3",Type="Single",EnableScrolling=true})
 local ThTab=Win:DrawTab({Name="Themes",Icon="paintbrush",Type="Single"})
@@ -1154,7 +1156,7 @@ UISec:AddButton({Name="Destroy GUI",Callback=function()
     task.delay(0.15,function() pcall(function() Win:Destroy() end) end)
 end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
-InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nGojo: renders via Yuji's cached position\nAnos: detects any difficulty\nChest: opens one at a time + Yes click"})
+InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind (offset)\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nAnos: separate summon remote, detects any difficulty\nChest: batch open all at once"})
 local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
 ThSec:AddDropdown({Name="Select Theme",Default="Default",Values={"Default","Dark Green","Dark Blue","Purple Rose","Skeet"},Callback=function(v) Hub:SetTheme(v) end})
 local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
