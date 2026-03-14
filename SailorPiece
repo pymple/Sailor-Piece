@@ -21,8 +21,9 @@ Settings={"RemoteEvents","SettingsToggle"},
 QuestRepeat={"RemoteEvents","QuestRepeat"},
 SummonBoss={"Remotes","RequestSummonBoss"},
 AnosBoss={"Remotes","RequestSpawnAnosBoss"},
+StrongestBoss={"Remotes","RequestSpawnStrongestBoss"},
 }
-local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AnosDiff="Normal",AutoChest=false,FarmMode="Plank",MoveMode="Tween",OffsetDist=5,AutoMerchant=false,MerchNotify=true}
+local F={AutoFarmLevel=false,HeightOffset=10,TweenSpeed=100,AntiAFK=true,AutoEquip=true,AutoQuest=true,AutoSpawn=false,SelectedIsland="Auto",SkillZ=false,SkillX=false,SkillC=false,SkillV=false,SkillB=false,SkillCooldown=1.0,BossEnabled=false,SummonBossEnabled=false,GilgameshDiff="Normal",BlessedMaidenDiff="Normal",AnosDiff="Normal",StrongestTodayDiff="Normal",StrongestHistoryDiff="Normal",AutoChest=false,FarmMode="Plank",MoveMode="Tween",OffsetDist=5,AutoMerchant=false,MerchNotify=true}
 ---------- CONSTANTS & DATA ----------
 S.ICON="rbxthumb://type=AvatarHeadShot&id=583572860&w=420&h=420"
 S.DISCORD="https://discord.gg/B3PurfCy"
@@ -60,6 +61,8 @@ S.SummonBosses={
     {Name="GilgameshBoss",Display="Gilgamesh",Difficulties={"Normal","Medium","Hard","Extreme"}},
     {Name="BlessedMaidenBoss",Display="Blessed Maiden",Difficulties={"Normal","Medium","Hard","Extreme"}},
     {Name="AnosBoss",Display="Anos",Island="Academy",Difficulties={"Normal","Medium","Hard","Extreme"}},
+    {Name="StrongestTodayBoss",Display="Strongest Today",Island="Shinjuku",Difficulties={"Normal","Medium","Hard","Extreme"}},
+    {Name="StrongestHistoryBoss",Display="Strongest in History",Island="Shinjuku",Difficulties={"Normal","Medium","Hard","Extreme"}},
 }
 S.IgnoreList={"groupreward","katana","buyer","madoka","training","dummy","merchant","shop","vendor","shadow questline","shadowmonarch","obshakilsinhead","buff","questnpc"}
 S.ChestNames={"Common Chest","Rare Chest","Epic Chest","Legendary Chest","Mythical Chest","Divine Chest","Godly Chest"}
@@ -154,7 +157,10 @@ end
 fn.PlayerHRP=function() local c=LP.Character return c and c:FindFirstChild("HumanoidRootPart") end
 fn.DistTo=function(pos) if not pos then return 99999 end local hrp=fn.PlayerHRP() if not hrp then return 99999 end return(hrp.Position-pos).Magnitude end
 fn.IsAnosModel=function(name) return name and name:find("AnosBoss")~=nil end
-fn.IsBoss=function(n) return S.AllBossNames[n]==true or fn.IsAnosModel(n) end
+fn.IsStrongestTodayModel=function(name) return name and name:find("StrongestofTodayBoss")~=nil end
+fn.IsStrongestHistoryModel=function(name) return name and name:find("StrongestinHistoryBoss")~=nil end
+fn.IsStrongestModel=function(name) return fn.IsStrongestTodayModel(name) or fn.IsStrongestHistoryModel(name) end
+fn.IsBoss=function(n) return S.AllBossNames[n]==true or fn.IsAnosModel(n) or fn.IsStrongestModel(n) end
 fn.GetBossIsland=function(name) if S.BossIsland[name] then return S.BossIsland[name] end if fn.IsAnosModel(name) then return S.ANOS_ISLAND end return nil end
 fn.GetBossDisplay=function(name) if S.BossDisplay[name] then return S.BossDisplay[name] end if fn.IsAnosModel(name) then local diff=name:match("AnosBoss_(.+)") if diff then return "Anos ("..diff..")" end return "Anos" end return name end
 fn.WalkPathWait=function(base,t,...)
@@ -419,7 +425,7 @@ fn.AllBossesOnIsland=function(island)
         if m:IsA("Model") then
             local hm=fn.GetHum(m)
             if hm and hm.Health>0 then
-                if S.AllBossNames[m.Name] and S.BF[m.Name] and S.BossIsland[m.Name]==island then table.insert(out,m.Name) end
+                if S.AllBossNames[m.Name] and S.BF[m.Name] and S.BossIsland[m.Name]==island and not fn.IsBossOnCooldown(m.Name) then table.insert(out,m.Name) end
             end
         end
     end
@@ -444,7 +450,7 @@ fn.PickNextBossName=function()
         if m:IsA("Model") then
             local hm=fn.GetHum(m)
             if hm and hm.Health>0 then
-                if S.AllBossNames[m.Name] and S.BF[m.Name] then table.insert(alive,m.Name) end
+                if S.AllBossNames[m.Name] and S.BF[m.Name] and not fn.IsBossOnCooldown(m.Name) then table.insert(alive,m.Name) end
             end
         end
     end
@@ -471,6 +477,13 @@ fn.PickNextBossName=function()
     return alive[1]
 end
 fn.RecordBossDeath=function(name) S.BossDeathTimes[name]=tick() end
+fn.IsBossOnCooldown=function(name)
+    local dt=S.BossDeathTimes[name]
+    if dt and tick()-dt<30 then return true end
+    local tc=S.BossTimerCache[name]
+    if tc and (tick()-(tc.t or 0))<5 and not tc.alive then return true end
+    return false
+end
 fn.ScanAllBossTimers=function()
     fn.CacheBossPositions()
     local results={}
@@ -517,9 +530,6 @@ fn.EquipSword=function()
 end
 fn.GetGoalForEnemy=function(enemy)
     local pos=fn.ModelPos(enemy) if not pos then return nil,nil end
-    if S.BossFight and F.FarmMode=="Plank" and S.HoverPos then
-        return Vector3.new(pos.X,math.max(pos.Y+F.HeightOffset,S.HoverPos.Y),pos.Z),pos
-    end
     if F.FarmMode=="Behind" then
         local ecf=fn.ModelCF(enemy)
         if ecf then
@@ -535,7 +545,7 @@ fn.TweenTo=function(enemy)
     local goal,look=fn.GetGoalForEnemy(enemy) if not goal then return end
     local hrp=fn.PlayerHRP() if not hrp then return end
     local d=(hrp.Position-goal).Magnitude
-    if d>400 then return end
+    if d>600 then return end
     if F.MoveMode=="Teleport" then
         fn.StopTw()
         hrp.CFrame=CFrame.new(goal,look or goal)
@@ -653,7 +663,7 @@ fn.Conn(RunService.RenderStepped:Connect(function()
         if goal then
             if goal.Y<-30 then S.LockTarget=nil
             else
-                if F.FarmMode=="Plank" and S.HoverPos then goal=Vector3.new(goal.X,math.max(goal.Y,S.HoverPos.Y),goal.Z) end
+                if F.FarmMode=="Plank" and S.HoverPos and not inBossFight then goal=Vector3.new(goal.X,math.max(goal.Y,S.HoverPos.Y),goal.Z) end
                 hrp.CFrame=CFrame.new(goal,look or goal) S.HoverPos=goal
             end
         end
@@ -752,10 +762,25 @@ fn.DoBossTick=function()
         end
         if tick()-S.LastBossTP<4 then task.wait(0.2) return end
         fn.ClearTgt() S.HoverPos=nil S.LastBossTP=tick()
-        S.Notify.new({Title="Teleporting to "..fn.PortalDisplayName(bi),Content=fn.GetBossDisplay(S.BossTargetName),Duration=2,Icon=S.ICON})
-        fn.ForceTP(bi)
-        task.wait(1.5)
+        local alreadyHere=S.BossCurrentIsland and S.BossCurrentIsland==bi
+        if not alreadyHere then
+            S.Notify.new({Title="Teleporting to "..fn.PortalDisplayName(bi),Content=fn.GetBossDisplay(S.BossTargetName),Duration=2,Icon=S.ICON})
+            fn.ForceTP(bi)
+            task.wait(1.5)
+        else
+            S.Notify.new({Title="Searching for "..fn.GetBossDisplay(S.BossTargetName),Content="Already on "..fn.PortalDisplayName(bi),Duration=2,Icon=S.ICON})
+        end
         S.BossCurrentIsland=bi
+        local m2=fn.CheckBoss(S.BossTargetName)
+        if m2 then
+            local bp2=fn.ModelPos(m2)
+            if bp2 and fn.DistTo(bp2)<500 then
+                local goal=Vector3.new(bp2.X,bp2.Y+F.HeightOffset,bp2.Z)
+                fn.TweenToPoint(goal)
+                S.BossTPDone=true
+                return
+            end
+        end
         local renderPos=fn.GetRenderPos(S.BossTargetName)
         if renderPos then
             local hrp=fn.PlayerHRP()
@@ -792,7 +817,7 @@ fn.DoBossTick=function()
                 local nextIsland=fn.GetBossIsland(nextName)
                 if nextIsland==S.BossCurrentIsland then
                     S.BossTPDone=true
-                    if savedHover then S.HoverPos=savedHover end
+                    S.HoverPos=nil
                     local hrp=fn.PlayerHRP()
                     if hrp and savedHover then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
                 else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland S.HoverPos=nil end
@@ -825,7 +850,7 @@ fn.DoBossTick=function()
             local nextIsland=fn.GetBossIsland(nextName)
             if nextIsland==S.BossCurrentIsland then
                 S.BossTPDone=true
-                if savedHover then S.HoverPos=savedHover end
+                S.HoverPos=nil
                 local hrp=fn.PlayerHRP()
                 if hrp and savedHover then hrp.CFrame=CFrame.new(savedHover,savedHover+S.LOOK_DOWN) end
             else S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=nextIsland S.HoverPos=nil end
@@ -834,7 +859,8 @@ fn.DoBossTick=function()
         return
     end
     local bossP=fn.ModelPos(model)
-    if not bossP then S.BossTPDone=false task.wait(0.3) return end
+    if not bossP then task.wait(0.3) return end
+    if fn.DistTo(bossP)>500 then S.BossTPDone=false return end
     S.CurTarget=model
     fn.TweenTo(model)
     fn.Attack(model)
@@ -844,6 +870,8 @@ fn.GetSummonBossDiff=function(name)
     if name=="GilgameshBoss" then return F.GilgameshDiff end
     if name=="BlessedMaidenBoss" then return F.BlessedMaidenDiff end
     if name=="AnosBoss" then return F.AnosDiff end
+    if name=="StrongestTodayBoss" then return F.StrongestTodayDiff end
+    if name=="StrongestHistoryBoss" then return F.StrongestHistoryDiff end
     return nil
 end
 fn.DetectSummonError=function()
@@ -872,6 +900,16 @@ fn.FireSummonBoss=function(name)
             if not r then return end
             local diff=fn.GetSummonBossDiff(name) or "Normal"
             r:FireServer("Anos",diff)
+        elseif name=="StrongestTodayBoss" then
+            local r=fn.WalkPathWait(RS,2,unpack(R.StrongestBoss))
+            if not r then return end
+            local diff=fn.GetSummonBossDiff(name) or "Normal"
+            r:FireServer("StrongestToday",diff)
+        elseif name=="StrongestHistoryBoss" then
+            local r=fn.WalkPathWait(RS,2,unpack(R.StrongestBoss))
+            if not r then return end
+            local diff=fn.GetSummonBossDiff(name) or "Normal"
+            r:FireServer("StrongestHistory",diff)
         else
             local r=fn.WalkPathWait(RS,2,unpack(R.SummonBoss))
             if not r then return end
@@ -896,6 +934,18 @@ fn.CheckSummonBoss=function(name)
     if name=="AnosBoss" then
         for _,m in ipairs(nf:GetChildren()) do
             if m:IsA("Model") and fn.IsAnosModel(m.Name) then local hm=fn.GetHum(m) if hm and hm.Health>0 then return m end end
+        end
+        return nil
+    end
+    if name=="StrongestTodayBoss" then
+        for _,m in ipairs(nf:GetChildren()) do
+            if m:IsA("Model") and fn.IsStrongestTodayModel(m.Name) then local hm=fn.GetHum(m) if hm and hm.Health>0 then return m end end
+        end
+        return nil
+    end
+    if name=="StrongestHistoryBoss" then
+        for _,m in ipairs(nf:GetChildren()) do
+            if m:IsA("Model") and fn.IsStrongestHistoryModel(m.Name) then local hm=fn.GetHum(m) if hm and hm.Health>0 then return m end end
         end
         return nil
     end
@@ -1027,6 +1077,14 @@ fn.DoSummonBossTick=function()
         local _hrp=fn.PlayerHRP() if _hrp then S.HoverPos=_hrp.Position end
         SummonAllEnabled()
         local nextName,nextModel=fn.AcquireSummonBossFast(nil,3.0)
+        if not nextName then task.wait(0.5) nextName,nextModel=fn.AcquireSummonBossFast(nil,3.0) end
+        if nextModel then
+            local bp=fn.ModelPos(nextModel)
+            if bp then
+                local goal=Vector3.new(bp.X,bp.Y+F.HeightOffset,bp.Z)
+                fn.TweenToPoint(goal)
+            end
+        end
         S.SummonBossTPDone=true S.SummonBossTarget=nextName
         if nextModel then S.CurTarget=nextModel end
         return
@@ -1122,12 +1180,6 @@ fn.DoSummonBossTick=function()
     end
     local bossPos=fn.ModelPos(model)
     if not bossPos or bossPos.Y<-30 then task.wait(0.15) return end
-    local _hrp=fn.PlayerHRP()
-    if _hrp and (bossPos-_hrp.Position).Magnitude>600 then
-        S.SummonBossTPDone=false S.LastSummonBossTP=0
-        fn.ClearTgt()
-        return
-    end
     S.CurTarget=model
     fn.TweenTo(model)
     fn.Attack(model)
@@ -1203,7 +1255,7 @@ local BSummonSec=FTab:DrawSection({Name="Auto Summon Boss",Position="right"})
 S.SummonBossToggle=BSummonSec:AddToggle({Name="Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then fn.ExitSummonBossMode() end end})
 S.SummonBossToggle.Link:AddKeybind({Default="N",Flag="SummonBossKeybind",Callback=fn.ToggleSummonBoss})
 S.SummonBossToggle.Link:AddHelper({Text="Priority over farm & timer bosses"})
-local SummonDiffKeys={GilgameshBoss="GilgameshDiff",BlessedMaidenBoss="BlessedMaidenDiff",AnosBoss="AnosDiff"}
+local SummonDiffKeys={GilgameshBoss="GilgameshDiff",BlessedMaidenBoss="BlessedMaidenDiff",AnosBoss="AnosDiff",StrongestTodayBoss="StrongestTodayDiff",StrongestHistoryBoss="StrongestHistoryDiff"}
 for _,bDef in ipairs(S.SummonBosses) do
     local bossName=bDef.Name
     local bossDisplay=bDef.Display
@@ -1307,8 +1359,11 @@ task.spawn(function()
             if F.BossEnabled and not S.BossFight then
                 local nextName=fn.PickNextBossName()
                 if nextName then
-                    S.BossFight=true S.BossTargetName=nextName S.BossTPDone=false S.LastBossTP=0 S.BossCurrentIsland=fn.GetBossIsland(nextName) fn.ClearTgt() S.HoverPos=nil S.CurIsland=nil S.IslandTPd=false
-                    S.Notify.new({Title="BOSS: "..fn.GetBossDisplay(nextName),Content="On "..(S.BossCurrentIsland or "?").." | Stopping farm",Duration=4,Icon=S.ICON})
+                    local bossIsland=fn.GetBossIsland(nextName)
+                    local alreadyOnIsland=S.CurIsland and bossIsland and S.CurIsland.Portal==bossIsland and S.IslandTPd
+                    S.BossFight=true S.BossTargetName=nextName S.BossTPDone=alreadyOnIsland S.LastBossTP=0 S.BossCurrentIsland=bossIsland fn.ClearTgt() S.HoverPos=nil
+                    if not alreadyOnIsland then S.CurIsland=nil S.IslandTPd=false end
+                    S.Notify.new({Title="BOSS: "..fn.GetBossDisplay(nextName),Content="On "..(S.BossCurrentIsland or "?")..(alreadyOnIsland and " (same island)" or " | Stopping farm"),Duration=4,Icon=S.ICON})
                 end
             end
             if S.BossFight then fn.DoBossTick() task.wait(0.1) break end
