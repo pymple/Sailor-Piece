@@ -869,11 +869,9 @@ local function DoSummonBossTick()
         BossKills=BossKills+1 Kills=Kills+1
         Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
+        SummonAutoSpawnFired[deadName]=nil
+        SummonBossTPDone=false LastSummonBossTP=0
         SummonBossTarget=nil ClearTgt() HoverPos=nil
-        task.wait(0.15)
-        for _,b in ipairs(SummonBosses) do
-            if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
-        end
         return
     end
     CurTarget=model
@@ -1021,7 +1019,7 @@ task.spawn(function()
                 ClearTgt() HoverPos=nil WaitChar() task.wait(0.3)
                 if F.AutoEquip then EquipSword() task.wait(0.2) end
                 if not BossFight and not SummonBossFight then IslandTPd=false SpawnDone=false end
-                LastBossTP=0 BossTPDone=false LastSummonBossTP=0
+                LastBossTP=0 BossTPDone=false LastSummonBossTP=0 SummonBossTPDone=false
             end
             if not IsAlive() then task.wait(0.3) break end
             if not isSummonActive and SummonBossFight then ExitSummonBossMode() end
