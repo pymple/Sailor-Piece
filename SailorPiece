@@ -1,3 +1,5 @@
+
+
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UserInputService=game:GetService("UserInputService")
@@ -111,11 +113,6 @@ local SummonBossCommitted={}
 local SummonBossCurrentIsland=nil
 local SummonBossOrder=0
 local SummonBossFailCount={}
-local SummonBossLastFire={}
-local SummonBossLastKill={}
-local SummonBossStuckSince=0
-local SUMMON_GRACE=12
-local SUMMON_STUCK_TIMEOUT=30
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
@@ -215,7 +212,7 @@ local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     AbandonAllQuests()
     LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} SummonBossLastFire={} SummonBossLastKill={} SummonBossStuckSince=0
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={}
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -834,7 +831,6 @@ local function GetSummonBossDiff(name)
 end
 local function FireSummonBoss(name)
     if not BSF[name] then return end
-    SummonBossLastFire[name]=tick()
     pcall(function()
         if name=="AnosBoss" then
             local r=WalkPathWait(RS,2,unpack(R.AnosBoss))
@@ -870,7 +866,7 @@ local function HasAnySummonBossEnabled()
     return false
 end
 local function ExitSummonBossMode()
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} SummonBossLastFire={} SummonBossLastKill={} SummonBossStuckSince=0
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={}
     ClearTgt() HoverPos=nil
 end
 local function SummonBossPosValid(model)
@@ -1004,31 +1000,19 @@ local function DoSummonBossTick()
     if not SummonBossTarget then
         SummonBossTarget=PickBestTarget()
         if not SummonBossTarget then
-            -- Track stuck time — if no target found for too long, exit summon mode
-            if SummonBossStuckSince==0 then SummonBossStuckSince=tick() end
-            if tick()-SummonBossStuckSince>SUMMON_STUCK_TIMEOUT then
-                Notify.new({Title="Summon Boss",Content="No targets for "..SUMMON_STUCK_TIMEOUT.."s — returning to farm",Duration=4,Icon=ICON})
-                ExitSummonBossMode()
-                return
-            end
-            -- Clear committed for current-island bosses not alive; only count fail if grace period elapsed
+            -- Clear committed for current-island bosses not alive; track per-boss fail counts
             for _,b in ipairs(SummonBosses) do
                 if SummonBossCommitted[b.Name] and GetSummonBossIsland(b.Name)==SummonBossCurrentIsland and not CheckSummonBoss(b.Name) then
-                    local lastFire=SummonBossLastFire[b.Name] or 0
-                    local lastKill=SummonBossLastKill[b.Name] or 0
-                    local elapsed=tick()-math.max(lastFire,lastKill)
-                    if elapsed>=SUMMON_GRACE then
-                        SummonBossCommitted[b.Name]=nil
-                        SummonBossFailCount[b.Name]=(SummonBossFailCount[b.Name] or 0)+1
-                        if SummonBossFailCount[b.Name]>=3 then
-                            BSF[b.Name]=false
-                            local tgl=BSFToggle[b.Name]
-                            if tgl then
-                                pcall(function() tgl:SetValue(false) end)
-                            end
-                            local dsp=SummonBossDisplay[b.Name] or b.Name
-                            Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=ICON})
+                    SummonBossCommitted[b.Name]=nil
+                    SummonBossFailCount[b.Name]=(SummonBossFailCount[b.Name] or 0)+1
+                    if SummonBossFailCount[b.Name]>=3 then
+                        BSF[b.Name]=false
+                        local tgl=BSFToggle[b.Name]
+                        if tgl then
+                            pcall(function() tgl:SetValue(false) end)
                         end
+                        local dsp=SummonBossDisplay[b.Name] or b.Name
+                        Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=ICON})
                     end
                 end
             end
@@ -1036,21 +1020,9 @@ local function DoSummonBossTick()
             if not HasAnySummonBossEnabled() then
                 task.wait(0.3) return
             end
-            -- Only re-summon bosses that aren't in cooldown grace period
-            for _,b in ipairs(SummonBosses) do
-                if BSF[b.Name] and not SummonBossCommitted[b.Name] and GetSummonBossIsland(b.Name)==SummonBossCurrentIsland then
-                    local lastKill=SummonBossLastKill[b.Name] or 0
-                    if tick()-lastKill>=SUMMON_GRACE then
-                        FireSummonBoss(b.Name)
-                        SummonBossOrder=SummonBossOrder+1
-                        SummonBossCommitted[b.Name]=SummonBossOrder
-                        task.wait(0.1)
-                    end
-                end
-            end
+            SummonAllEnabled()
             local nextName,_=AcquireSummonBossFast(nil,1.0)
             SummonBossTarget=nextName
-            if SummonBossTarget then SummonBossStuckSince=0 end
             if not SummonBossTarget then
                 -- Check if there are bosses on other islands
                 for _,b in ipairs(SummonBosses) do
@@ -1060,11 +1032,10 @@ local function DoSummonBossTick()
                         return
                     end
                 end
-                task.wait(0.5)
+                task.wait(0.3)
             end
             return
         end
-        SummonBossStuckSince=0
         Notify.new({Title="Summon Boss: "..(SummonBossDisplay[SummonBossTarget] or SummonBossTarget),Content="Attacking!",Duration=2,Icon=ICON})
     end
     -- Phase 3: check if target needs island switch
@@ -1085,9 +1056,7 @@ local function DoSummonBossTick()
         BossKills=BossKills+1 Kills=Kills+1 KillCount=KillCount+1
         Notify.new({Title="Killed "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
-        SummonBossLastKill[deadName]=tick()
         SummonBossTarget=nil ClearTgt()
-        SummonBossStuckSince=0
         -- Re-summon the killed boss if still enabled
         if BSF[deadName] and GetSummonBossIsland(deadName)==SummonBossCurrentIsland then
             task.wait(0.3)
@@ -1131,7 +1100,6 @@ Hub:Loader(ICON,2).yield()
 Win=Hub.new({Name="PIMPLE v7.5",Keybind="LeftAlt",Logo=ICON,TextSize=18,Font=Enum.Font.GothamBold})
 Win.OnToggle=function() end
 Notify.new({Title="pimpleHUB v7.5",Content="Left Alt = UI | V = Farm | B = Boss | N = Summon | M = Skills",Duration=5,Icon=ICON})
-do
 local WM=Win:Watermark()
 WM:AddText({Icon="user",Text=LP.DisplayName})
 WM:AddText({Icon="clock",Text=Hub:GetDate()})
@@ -1257,7 +1225,7 @@ task.defer(function()
         end
     end)
 end)
-end
+Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() elseif input.KeyCode==Enum.KeyCode.B then ToggleBoss() elseif input.KeyCode==Enum.KeyCode.N then ToggleSummonBoss() elseif input.KeyCode==Enum.KeyCode.M then ToggleAllSkills() end end))
 SetupAntiAFK()
 task.spawn(DisableGameAutoSkills)
 task.spawn(function() while Running do if F.AutoQuest then QuestCompletionScan() end task.wait(2) end end)
@@ -1276,7 +1244,7 @@ task.spawn(function()
             if not IsAlive() then task.wait(0.3) break end
             if not isSummonActive and SummonBossFight then ExitSummonBossMode() end
             if isSummonActive and not SummonBossFight then
-                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} SummonBossLastFire={} SummonBossLastKill={} SummonBossStuckSince=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
                 Notify.new({Title="Summon Boss Mode",Content="Starting summon boss cycle",Duration=3,Icon=ICON})
             end
             if SummonBossFight then DoSummonBossTick() task.wait(0.1) break end
