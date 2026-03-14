@@ -52,7 +52,7 @@ local Hub,Notify,Win,CfgMgr,FarmToggle
 local Running=true
 local CurIsland,CurTarget=nil,nil
 local Conns={}
-local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant=0,0,0,0,0,0,0
+local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant,LastQuestBusy=0,0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
 local ConfLevel=0
 local ATween,TweenOn=nil,false
@@ -76,6 +76,9 @@ local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
 local function StopTw() if ATween then pcall(function() ATween:Cancel() end) ATween=nil end TweenOn=false TweenTarget=nil end
+local function DarkenColor(c,f) f=f or 0.55 return Color3.new(math.max(0,c.R*f),math.max(0,c.G*f),math.max(0,c.B*f)) end
+local ButtonBorderStrokes={}
+local function RefreshButtonBorders(bc) for _,s in ipairs(ButtonBorderStrokes) do pcall(function() if s and s.Parent then s.Color=bc end end) end end
 local function ClearTgt() CurTarget=nil LockTarget=nil StopTw() end
 local function GetHum(e)
     if not e then return nil end
@@ -142,7 +145,7 @@ local function MatchEnemy(name,island) if not island then return false end local
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end)
-    QState="NONE" LastQuestAccept=0 QCompDet=false BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
+    QState="NONE" LastQuestAccept=0 QCompDet=false LastQuestBusy=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -521,7 +524,7 @@ end))
 local function ExitBossMode(lastBossName)
     local bi=lastBossName and GetBossIsland(lastBossName)
     BossFight=false BossTargetName=nil BossTPDone=false BossCurrentIsland=nil ClearTgt() HoverPos=nil LastBossTP=0
-    QCompDet=false LastEnemy=0
+    QCompDet=false LastEnemy=0 LastQuestBusy=0
     local farmIsland=GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         CurIsland=farmIsland IslandTPd=true SpawnDone=true LastEnemy=tick()
@@ -662,6 +665,7 @@ Notify=Hub.newNotify()
 CfgMgr=Hub:ConfigManager({Directory="pimpleHUB",Config="Pimple-Configs"})
 Hub.Colors.Highlight=Color3.fromRGB(220,60,60)
 Hub.Colors.Toggle=Color3.fromRGB(220,60,60)
+Hub.Colors.StrokeColor=DarkenColor(Hub.Colors.Toggle)
 Hub:Loader(ICON,2).yield()
 Win=Hub.new({Name="PIMPLE v7.5",Keybind="LeftAlt",Logo=ICON,TextSize=18,Font=Enum.Font.GothamBold})
 Win.OnToggle=function() end
@@ -720,8 +724,8 @@ local SetTab=Win:DrawTab({Name="Settings",Icon="settings-3",Type="Single",Enable
 local ThTab=Win:DrawTab({Name="Themes",Icon="paintbrush",Type="Single"})
 local UISec=SetTab:DrawSection({Name="UI Settings",Position="left"})
 UISec:AddToggle({Name="Always Show Frame",Default=false,Callback=function(v) Win.AlwayShowTab=v end})
-UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v Hub:RefreshCurrentColor() end})
-UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Highlight",Default=Hub.Colors.Highlight,Callback=function(v) Hub.Colors.Highlight=v Hub.Colors.StrokeColor=DarkenColor(v) RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
+UISec:AddColorPicker({Name="Toggle Color",Default=Hub.Colors.Toggle,Callback=function(v) Hub.Colors.Toggle=v Hub.Colors.StrokeColor=DarkenColor(v) RefreshButtonBorders(DarkenColor(v)) Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Drop Color",Default=Hub.Colors.DropColor,Callback=function(v) Hub.Colors.DropColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Block Color",Default=Hub.Colors.BlockColor,Callback=function(v) Hub.Colors.BlockColor=v Hub:RefreshCurrentColor() end})
 UISec:AddColorPicker({Name="Background Color",Default=Hub.Colors.BGDBColor,Callback=function(v) Hub.Colors.BGDBColor=v Hub:RefreshCurrentColor() end})
@@ -733,9 +737,25 @@ local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
 ThSec:AddDropdown({Name="Select Theme",Default="Default",Values={"Default","Dark Green","Dark Blue","Purple Rose","Skeet"},Callback=function(v) Hub:SetTheme(v) end})
 local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
 CfgUI:Init()
+task.defer(function()
+    pcall(function()
+        local hubGui
+        for _,ch in ipairs(LP.PlayerGui:GetChildren()) do if ch:IsA("ScreenGui") and ch.Name:find("PIMPLE") then hubGui=ch break end end
+        if not hubGui then return end
+        local bc=DarkenColor(Hub.Colors.Toggle)
+        for _,d in ipairs(hubGui:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("ImageButton") or d:IsA("Frame")) and d:FindFirstChildOfClass("UICorner") then
+                local s=d:FindFirstChildOfClass("UIStroke")
+                if not s then s=Instance.new("UIStroke") s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border s.Parent=d end
+                s.Thickness=2 s.Color=bc
+                table.insert(ButtonBorderStrokes,s)
+            end
+        end
+    end)
+end)
 Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
 SetupAntiAFK()
-task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and not BossFight then if QState=="ACTIVE" and QuestScanComplete() then QCompDet=true end if QState=="NONE" and QuestScanBusy() then QState="ACTIVE" end end task.wait(0.1) end end)
+task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and not BossFight then if QuestScanBusy() then if QState=="NONE" then QState="ACTIVE" end QCompDet=false LastQuestBusy=tick() elseif QState=="ACTIVE" and QuestScanComplete() and tick()-LastQuestBusy>30 then QCompDet=true end end task.wait(0.1) end end)
 task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
 task.spawn(function()
     while Running do
