@@ -54,7 +54,7 @@ local Hub,Notify,Win,CfgMgr,FarmToggle
 local Running=true
 local CurIsland,CurTarget=nil,nil
 local Conns={}
-local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant=0,0,0,0,0,0,0
+local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant,LastCanCollide=0,0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
 local ConfLevel=0
 local ATween,TweenOn=nil,false
@@ -222,8 +222,19 @@ local function SafeInvoke(remote,timeout,...)
     while not done and tick()-t<(timeout or 3) do task.wait(0.05) end
     return ok,result
 end
+local function HasChestInInventory(name)
+    local lo=name:lower()
+    local bp=LP:FindFirstChild("Backpack")
+    if bp then for _,t in ipairs(bp:GetChildren()) do if t.Name:lower()==lo then return true end end end
+    local char=LP.Character
+    if char then for _,t in ipairs(char:GetChildren()) do if t:IsA("Tool") and t.Name:lower()==lo then return true end end end
+    return false
+end
 local function OpenAllChests()
     if not F.AutoChest then return end
+    local anyInInventory=false
+    for _,name in ipairs(ChestNames) do if HasChestInInventory(name) then anyInInventory=true break end end
+    if not anyInInventory then return end
     if tick()-LastChest<5 then return end
     LastChest=tick()
     local useItem
@@ -231,16 +242,18 @@ local function OpenAllChests()
     if not useItem then return end
     local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        if isEvent then
-            pcall(function() useItem:FireServer("Use",name,999,false) end)
-        else
-            SafeInvoke(useItem,3,"Use",name,999,false)
+        if HasChestInInventory(name) then
+            if isEvent then
+                pcall(function() useItem:FireServer("Use",name,999,false) end)
+            else
+                SafeInvoke(useItem,3,"Use",name,999,false)
+            end
+            task.wait(0.15)
+            ClickYes()
+            task.wait(0.15)
+            ClickYes()
+            task.wait(0.1)
         end
-        task.wait(0.15)
-        ClickYes()
-        task.wait(0.15)
-        ClickYes()
-        task.wait(0.1)
     end
 end
 local function BuyMerchantItems()
@@ -547,7 +560,7 @@ Conn(RunService.RenderStepped:Connect(function()
     local hrp=c:FindFirstChild("HumanoidRootPart") if not hrp then return end
     if F.FarmMode=="Plank" then
         local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=true end
-        for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
+        if tick()-LastCanCollide>1 then LastCanCollide=tick() for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
     end
     if TweenOn then return end
     if LockTarget then
