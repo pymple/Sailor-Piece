@@ -832,6 +832,22 @@ local function ExitSummonBossMode()
     SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={}
     ClearTgt() HoverPos=nil
 end
+local function AcquireSummonBossFast(preferredName,timeout)
+    local deadline=tick()+(timeout or 1.2)
+    while tick()<deadline do
+        if preferredName then
+            local preferred=CheckSummonBoss(preferredName)
+            if preferred then return preferredName,preferred end
+        end
+        local nextName=PickNextSummonBoss()
+        if nextName then
+            local m=CheckSummonBoss(nextName)
+            if m then return nextName,m end
+        end
+        task.wait(0.05)
+    end
+    return nil,nil
+end
 local function DoSummonBossTick()
     if not SummonBossTPDone then
         if tick()-LastSummonBossTP<4 then task.wait(0.2) return end
@@ -839,12 +855,22 @@ local function DoSummonBossTick()
         Notify.new({Title="Summon Boss",Content="Teleporting to Boss Island",Duration=2,Icon=ICON})
         StopTw() HoverPos=nil ClearTgt()
         ForceTP(BOSS_ISLAND_PORTAL)
-        task.wait(1.5)
+        task.wait(0.9)
         local _hrp=PlayerHRP() if _hrp then HoverPos=_hrp.Position end
         for _,b in ipairs(SummonBosses) do
             if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
         end
-        SummonBossTPDone=true SummonBossTarget=nil
+        local nextName,nextModel=AcquireSummonBossFast(nil,1.0)
+        SummonBossTPDone=true SummonBossTarget=nextName
+        if nextModel then
+            CurTarget=nextModel
+            local p=ModelPos(nextModel)
+            local hrp=PlayerHRP()
+            if p and hrp and (hrp.Position-p).Magnitude>35 then
+                StopTw()
+                hrp.CFrame=CFrame.new(p.X,p.Y+F.HeightOffset,p.Z)
+            end
+        end
         return
     end
     if not SummonBossTarget then
@@ -853,7 +879,9 @@ local function DoSummonBossTick()
             for _,b in ipairs(SummonBosses) do
                 if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
             end
-            task.wait(1)
+            local nextName=AcquireSummonBossFast(nil,1.0)
+            SummonBossTarget=nextName
+            if not SummonBossTarget then task.wait(0.1) end
             return
         end
         Notify.new({Title="Summon Boss: "..(SummonBossDisplay[SummonBossTarget] or SummonBossTarget),Content="Attacking!",Duration=2,Icon=ICON})
@@ -867,6 +895,17 @@ local function DoSummonBossTick()
         SummonBossCommitted[deadName]=nil
         SummonBossTarget=nil ClearTgt()
         if BSF[deadName] then FireSummonBoss(deadName) SummonBossCommitted[deadName]=true end
+        local nextName,nextModel=AcquireSummonBossFast(deadName,1.25)
+        SummonBossTarget=nextName
+        if nextModel then
+            CurTarget=nextModel
+            local p=ModelPos(nextModel)
+            local hrp=PlayerHRP()
+            if p and hrp and (hrp.Position-p).Magnitude>35 then
+                StopTw()
+                hrp.CFrame=CFrame.new(p.X,p.Y+F.HeightOffset,p.Z)
+            end
+        end
         return
     end
     local bossPos=ModelPos(model)
