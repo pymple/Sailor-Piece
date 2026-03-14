@@ -521,11 +521,11 @@ end))
 local function ExitBossMode(lastBossName)
     local bi=lastBossName and GetBossIsland(lastBossName)
     BossFight=false BossTargetName=nil BossTPDone=false BossCurrentIsland=nil ClearTgt() HoverPos=nil LastBossTP=0
-    QState="NONE" LastQuestAccept=0 QCompDet=false LastEnemy=0
+    QCompDet=false LastEnemy=0
     local farmIsland=GetFarmIsland()
     if bi and farmIsland and farmIsland.Portal==bi then
         CurIsland=farmIsland IslandTPd=true SpawnDone=true LastEnemy=tick()
-        if F.AutoQuest then task.delay(0.15,function() QuestAccept(CurIsland) end) end
+        if F.AutoQuest and QState~="ACTIVE" then task.delay(0.15,function() QuestAccept(CurIsland) end) end
         Notify.new({Title="Bosses Clear!",Content="Already on "..bi..", resuming farm",Duration=3,Icon=ICON})
     else
         CurIsland=nil IslandTPd=false SpawnDone=false
@@ -566,7 +566,7 @@ local function DoFarmTick()
         if CurTarget then TweenTo(CurTarget) Attack(CurTarget) end
     else
         CurTarget=nil LockTarget=nil
-        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false QState="NONE" LastEnemy=0 QCompDet=false HoverPos=nil end
+        if tick()-LastEnemy>20 then IslandTPd=false SpawnDone=false LastEnemy=0 QCompDet=false HoverPos=nil end
         task.wait(0.15)
     end
     if F.AutoEquip and tick()-LastEquip>3 then LastEquip=tick() local eq=GetTool() if not eq or eq.Name:lower()=="combat" then EquipSword() end end
