@@ -166,7 +166,16 @@ local function ForceTP(portal)
     LastTP=tick() TPCount=1
     return ok
 end
-local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
+local function EnableGameQuestRepeat()
+    pcall(function()
+        local r=WalkPathWait(RS,3,unpack(SETTINGS_TOGGLE_PATH))
+        if not r then return end
+        r:FireServer("EnableQuestRepeat",true)
+        task.wait(0.05)
+        r:FireServer("AutoQuestRepeat",true)
+    end)
+end
+local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" task.spawn(EnableGameQuestRepeat) end
 local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" end
 local function QuestCompletionScan()
     if QState~="ACTIVE" then return end
@@ -201,20 +210,23 @@ local function PlayerHasChest(name)
 end
 local function OpenAllChests()
     if not F.AutoChest then return end
-    if tick()-LastChest<3 then return end
+    if tick()-LastChest<5 then return end
     LastChest=tick()
     local useItem
     pcall(function() useItem=WalkPathWait(RS,2,unpack(USE_ITEM_PATH)) end)
     if not useItem then return end
+    local isEvent=false pcall(function() isEvent=useItem:IsA("RemoteEvent") end)
     for _,name in ipairs(ChestNames) do
-        if PlayerHasChest(name) then
+        if isEvent then
             pcall(function() useItem:FireServer("Use",name,1,false) end)
-            task.wait(0.3)
-            ClickYes()
-            task.wait(0.3)
-            ClickYes()
-            task.wait(0.2)
+        else
+            pcall(function() useItem:InvokeServer("Use",name,1,false) end)
         end
+        task.wait(0.25)
+        ClickYes()
+        task.wait(0.25)
+        ClickYes()
+        task.wait(0.15)
     end
 end
 local function BuyMerchantItems()
@@ -710,7 +722,7 @@ FarmToggle=FSec:AddToggle({Name="Auto Farm Level",Flag="AutoFarmLevel",Default=f
 FarmToggle.Link:AddKeybind({Default="V",Flag="FarmLevelKeybind",Callback=ToggleFarm})
 FarmToggle.Link:AddHelper({Text="Plank above enemies & attack"})
 FSec:AddToggle({Name="Auto Equip Sword",Flag="AutoEquip",Default=true,Callback=function(v) F.AutoEquip=v end})
-FSec:AddToggle({Name="Auto Quest",Flag="AutoQuest",Default=true,Callback=function(v) F.AutoQuest=v end})
+FSec:AddToggle({Name="Auto Quest",Flag="AutoQuest",Default=true,Callback=function(v) F.AutoQuest=v if v and F.AutoFarmLevel then task.spawn(EnableGameQuestRepeat) end end})
 FSec:AddToggle({Name="Set Spawn Crystal",Flag="AutoSpawn",Default=false,Callback=function(v) F.AutoSpawn=v SpawnDone=false end}).Link:AddHelper({Text="TP to crystal on arrival"})
 FSec:AddToggle({Name="Anti-AFK",Flag="AntiAFK",Default=true,Callback=function(v) F.AntiAFK=v end}).Link:AddHelper({Text="Prevents disconnect"})
 FSec:AddDropdown({Name="Island",Default="Auto",Values=GetIslandNames(),Flag="SelectedIsland",Callback=function(v) F.SelectedIsland=v FullReset() end})
