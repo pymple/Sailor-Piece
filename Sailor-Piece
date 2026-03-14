@@ -448,9 +448,10 @@ local function Attack(tgt)
 end
 local function ToggleFarm() F.AutoFarmLevel=not F.AutoFarmLevel if FarmToggle then pcall(function() if FarmToggle.Set then FarmToggle:Set(F.AutoFarmLevel) end end) end if not F.AutoFarmLevel then FullReset() end end
 local function SetupAntiAFK()
+    pcall(function() for _,c in ipairs(getconnections(LP.Idled)) do c:Disable() end end)
     pcall(function() Conn(LP.Idled:Connect(function() if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) end end)) end)
-    task.spawn(function() while Running do task.wait(Jit(55,15)) if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) end end end)
-    task.spawn(function() while Running do task.wait(Jit(240,30)) if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) pcall(function() local hrp=PlayerHRP() if hrp then hrp.CFrame=hrp.CFrame*CFrame.new(0,0.1,0) task.wait(0.1) hrp.CFrame=hrp.CFrame*CFrame.new(0,-0.1,0) end end) pcall(function() keypress(0x57) task.wait(0.1) keyrelease(0x57) end) end end end)
+    task.spawn(function() while Running do task.wait(Jit(55,15)) if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) pcall(function() keypress(0x57) task.wait(0.1) keyrelease(0x57) end) end end end)
+    task.spawn(function() while Running do task.wait(Jit(240,30)) if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) pcall(function() keypress(0x41) task.wait(0.1) keyrelease(0x41) end) pcall(function() mousemoverel(1,0) task.wait(0.05) mousemoverel(-1,0) end) end end end)
 end
 local function OnCharAdded(char)
     char:WaitForChild("Humanoid",10) LockTarget=nil TweenOn=false TweenTarget=nil HoverPos=nil
@@ -459,7 +460,7 @@ end
 if LP.Character then task.spawn(function() OnCharAdded(LP.Character) end) end
 Conn(LP.CharacterAdded:Connect(OnCharAdded))
 local function GetIslandNames() local n={"Auto"} for _,i in ipairs(Islands) do table.insert(n,i.Portal) end return n end
-Conn(RunService.Stepped:Connect(function()
+Conn(RunService.RenderStepped:Connect(function()
     if not F.AutoFarmLevel then return end
     if TweenOn then return end
     local c=LP.Character if not c then return end
