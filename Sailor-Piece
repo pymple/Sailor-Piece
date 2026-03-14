@@ -164,6 +164,7 @@ end
 local function QuestAccept(island) if not island then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" QCompDet=false end
 local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" QCompDet=false end
 local function QuestScanComplete() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("quest completed") or t:find("quest complete") then return true end end end return false end
+local function QuestScanBusy() local pg=LP:FindFirstChild("PlayerGui") if not pg then return false end for _,d in ipairs(pg:GetDescendants()) do if d:IsA("TextLabel") or d:IsA("TextButton") then local t=(d.Text or ""):lower() if t:find("finish your current") or t:find("already have a quest") then return true end end end return false end
 local function ClickYes()
     local pg=LP:FindFirstChild("PlayerGui") if not pg then return end
     for _,desc in ipairs(pg:GetDescendants()) do
@@ -549,7 +550,7 @@ local function DoFarmTick()
         return
     end
     if F.AutoQuest then
-        if QState=="NONE" then if tick()-LastQuestAccept>8 then QuestAccept(CurIsland) end
+        if QState=="NONE" then if tick()-LastQuestAccept>30 then QuestAccept(CurIsland) end
         elseif QState=="ACTIVE" then if QCompDet then QState="COOLDOWN" QCompDet=false task.wait(0.5) QState="NONE" QuestAccept(CurIsland) end end
     end
     local enemies=FindEnemies(CurIsland)
@@ -694,6 +695,9 @@ FSec:AddButton({Name="Scan All NPCs",Callback=function()
     if nf then local ct={} local function addModel(m) if m:IsA("Model") then ct[m.Name]=(ct[m.Name] or 0)+1 end end for _,child in ipairs(nf:GetChildren()) do if child:IsA("Folder") then for _,m in ipairs(child:GetChildren()) do addModel(m) end else addModel(child) end end for n,c in pairs(ct) do table.insert(all,n.." x"..c) end table.sort(all) end
     Notify.new({Title="Matched: "..#en.." ("..isl.Portal..")",Content="All NPCs:\n"..table.concat(all,"\n"),Duration=15,Icon=ICON})
 end})
+local TpSec=FTab:DrawSection({Name="Teleport to Island",Position="left"})
+TpSec:AddHelper({Text="Manual TP only — blocked while Auto Farm is ON"})
+for _,isl in ipairs(Islands) do TpSec:AddButton({Name=isl.Portal,Callback=function() if F.AutoFarmLevel then Notify.new({Title="Auto Farm is ON",Content="Disable Auto Farm before teleporting manually",Duration=3,Icon=ICON}) return end ForceTP(isl.Portal) Notify.new({Title="TP -> "..isl.Portal,Content="Teleporting...",Duration=2,Icon=ICON}) end}) end
 local BSec=FTab:DrawSection({Name="Boss Farm",Position="right"})
 BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight and not(BossTargetName and IsAnosModel(BossTargetName)) then FullReset() end end}).Link:AddHelper({Text="World bosses below"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
@@ -732,7 +736,7 @@ local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
 CfgUI:Init()
 Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() end end))
 SetupAntiAFK()
-task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and QState=="ACTIVE" and not BossFight then if QuestScanComplete() then QCompDet=true end end task.wait(0.1) end end)
+task.spawn(function() while Running do if F.AutoFarmLevel and F.AutoQuest and not BossFight then if QState=="ACTIVE" and QuestScanComplete() then QCompDet=true end if QState=="NONE" and QuestScanBusy() then QState="ACTIVE" end end task.wait(0.1) end end)
 task.spawn(function() while Running do if F.AutoChest then OpenAllChests() end if F.AutoMerchant then BuyMerchantItems() end task.wait(8) end end)
 task.spawn(function()
     while Running do
