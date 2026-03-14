@@ -147,10 +147,19 @@ local function WaitChar() if IsAlive() then return true end local t=tick() while
 local function IsPlayer(m) for _,p in ipairs(Players:GetPlayers()) do if p.Character==m then return true end end return false end
 local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end if lo:match("boss$") then return true end return false end
 local function MatchEnemy(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do if lo:find(e:lower(),1,true) then return true end end return false end
+local function AbandonAllQuests()
+    local ab=nil pcall(function() ab=WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)) end)
+    if ab then
+        pcall(function() ab:FireServer("repeatable") end)
+        pcall(function() ab:FireServer() end)
+        for _,isl in ipairs(Islands) do pcall(function() ab:FireServer(isl.QuestNPC) end) end
+    end
+    QState="NONE"
+end
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
-    pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end)
-    QState="NONE" LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
+    AbandonAllQuests()
+    LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -180,7 +189,7 @@ local function EnableGameQuestRepeat()
 end
 local function QuestAccept(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_ACCEPT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" task.spawn(EnableGameQuestRepeat) end
 local function QuestRepeatFire(island) if not island or not island.QuestNPC then return end pcall(function() WalkPathWait(RS,3,unpack(QUEST_REPEAT_PATH)):FireServer(island.QuestNPC) end) LastQuestAccept=tick() QState="ACTIVE" end
-local function QuestAbandon() pcall(function() WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)):FireServer("repeatable") end) pcall(function() WalkPathWait(RS,2,unpack(QUEST_ABANDON_PATH)):FireServer() end) QState="NONE" end
+local function QuestAbandon() AbandonAllQuests() end
 local function QuestCompletionScan()
     if QState~="ACTIVE" then return end
     if tick()-LastQuestAccept>60 then QState="NONE" return end
