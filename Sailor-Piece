@@ -63,6 +63,8 @@ local BF={}
 for _,b in ipairs(Bosses) do BF[b.Name]=false end
 local BSF={}
 for _,b in ipairs(SummonBosses) do BSF[b.Name]=false end
+local SummonBossDisplay={}
+for _,b in ipairs(SummonBosses) do SummonBossDisplay[b.Name]=b.Display end
 local FM={}
 for _,item in ipairs(MerchantItems) do FM[item]=false end
 local Kills,BossKills=0,0
@@ -99,6 +101,7 @@ local SummonBossTarget=nil
 local SummonBossTPDone=false
 local LastSummonBossTP=0
 local SummonAutoSpawnFired={}
+local SummonBossCommitted={}
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
@@ -198,7 +201,7 @@ local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     AbandonAllQuests()
     LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={} SummonBossCommitted={}
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -822,12 +825,12 @@ local function HasAnySummonBossEnabled()
 end
 local function PickNextSummonBoss()
     for _,b in ipairs(SummonBosses) do
-        if BSF[b.Name] then local m=CheckSummonBoss(b.Name) if m then return b.Name end end
+        if BSF[b.Name] or SummonBossCommitted[b.Name] then local m=CheckSummonBoss(b.Name) if m then return b.Name end end
     end
     return nil
 end
 local function ExitSummonBossMode()
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonAutoSpawnFired={} SummonBossCommitted={}
     ClearTgt() HoverPos=nil
 end
 local function DoSummonBossTick()
@@ -843,7 +846,7 @@ local function DoSummonBossTick()
             end
         end
         for _,b in ipairs(SummonBosses) do
-            if BSF[b.Name] then FireSummonBoss(b.Name) task.wait(0.1) end
+            if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
         end
         SummonBossTPDone=true SummonBossTarget=nil
         return
@@ -852,21 +855,24 @@ local function DoSummonBossTick()
         SummonBossTarget=PickNextSummonBoss()
         if not SummonBossTarget then
             for _,b in ipairs(SummonBosses) do
-                if BSF[b.Name] then FireSummonBoss(b.Name) task.wait(0.1) end
+                if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
             end
             task.wait(1)
             return
         end
-        Notify.new({Title="Summon Boss: "..SummonBossTarget,Content="Attacking!",Duration=2,Icon=ICON})
+        Notify.new({Title="Summon Boss: "..(SummonBossDisplay[SummonBossTarget] or SummonBossTarget),Content="Attacking!",Duration=2,Icon=ICON})
     end
     local model=CheckSummonBoss(SummonBossTarget)
     if not model then
+        local deadName=SummonBossTarget
+        local deadDisplay=SummonBossDisplay[deadName] or deadName
         BossKills=BossKills+1 Kills=Kills+1
-        Notify.new({Title="KILLED: "..SummonBossTarget,Content="Total: "..BossKills,Duration=4,Icon=ICON})
+        Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
+        SummonBossCommitted[deadName]=nil
         SummonBossTarget=nil ClearTgt() HoverPos=nil
         task.wait(0.15)
         for _,b in ipairs(SummonBosses) do
-            if BSF[b.Name] then FireSummonBoss(b.Name) task.wait(0.1) end
+            if BSF[b.Name] then FireSummonBoss(b.Name) SummonBossCommitted[b.Name]=true task.wait(0.1) end
         end
         return
     end
@@ -938,7 +944,7 @@ BSec:AddToggle({Name="Anos (Academy)",Flag="AnosEnabled",Default=false,Callback=
 BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
 task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
 local BSummonSec=FTab:DrawSection({Name="Auto Summon Boss",Position="right"})
-BSummonSec:AddToggle({Name="Enable Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then ExitSummonBossMode() end end}).Link:AddHelper({Text="Boss Island summons — priority over farm & timer bosses"})
+BSummonSec:AddToggle({Name="Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then ExitSummonBossMode() end end}).Link:AddHelper({Text="Boss Island summons — priority over farm & timer bosses"})
 for _,bDef in ipairs(SummonBosses) do
     local flagName="SummonBoss_"..bDef.Name
     BSummonSec:AddToggle({Name=bDef.Display,Flag=flagName,Default=false,Callback=function(v) BSF[bDef.Name]=v end})
