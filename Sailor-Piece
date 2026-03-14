@@ -1126,13 +1126,15 @@ for _,name in ipairs(TpIslands) do
 end
 local BSec=FTab:DrawSection({Name="Auto Farm Boss",Position="right"})
 BossToggle=BSec:AddToggle({Name="Enable Boss Killing",Flag="BossEnabled",Default=false,Callback=function(v) F.BossEnabled=v if not v and BossFight then FullReset() end end})
-BossToggle.Link:AddHelper({Text="B = toggle | Timer-based world bosses"})
+BossToggle.Link:AddKeybind({Default="B",Flag="BossKeybind",Callback=ToggleBoss})
+BossToggle.Link:AddHelper({Text="Timer-based world bosses"})
 for _,bDef in ipairs(Bosses) do BSec:AddToggle({Name=bDef.Display.." ("..bDef.Island..")",Flag="Boss_"..bDef.Name,Default=false,Callback=function(v) BF[bDef.Name]=v end}) end
 BossInfoP=BSec:AddParagraph({Title="Boss Timers",Content="Scanning..."})
 task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAllBossTimers() if BossInfoP then pcall(function() local txt=GetBossTimerText() if BossInfoP.SetContent then BossInfoP:SetContent(txt) elseif BossInfoP.Set then BossInfoP:Set(txt) elseif BossInfoP.SetText then BossInfoP:SetText(txt) end end) end task.wait(1) end end)
 local BSummonSec=FTab:DrawSection({Name="Auto Summon Boss",Position="right"})
 SummonBossToggle=BSummonSec:AddToggle({Name="Auto Summon Boss",Flag="SummonBossEnabled",Default=false,Callback=function(v) F.SummonBossEnabled=v if not v then ExitSummonBossMode() end end})
-SummonBossToggle.Link:AddHelper({Text="N = toggle | Priority over farm & timer bosses"})
+SummonBossToggle.Link:AddKeybind({Default="N",Flag="SummonBossKeybind",Callback=ToggleSummonBoss})
+SummonBossToggle.Link:AddHelper({Text="Priority over farm & timer bosses"})
 local SummonDiffKeys={GilgameshBoss="GilgameshDiff",BlessedMaidenBoss="BlessedMaidenDiff",AnosBoss="AnosDiff"}
 for _,bDef in ipairs(SummonBosses) do
     local bossName=bDef.Name
