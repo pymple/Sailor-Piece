@@ -846,8 +846,10 @@ local function DoSummonBossTick()
         if tick()-LastSummonBossTP<4 then task.wait(0.2) return end
         LastSummonBossTP=tick()
         Notify.new({Title="Summon Boss",Content="Teleporting to Boss Island",Duration=2,Icon=ICON})
+        StopTw() HoverPos=nil ClearTgt()
         ForceTP(BOSS_ISLAND_PORTAL)
         task.wait(1.5)
+        local _hrp=PlayerHRP() if _hrp then HoverPos=_hrp.Position end
         for _,b in ipairs(SummonBosses) do
             if BSF[b.Name] and not SummonAutoSpawnFired[b.Name] then
                 FireAutoSpawnBoss(b.Name) SummonAutoSpawnFired[b.Name]=true task.wait(0.1)
@@ -878,8 +880,8 @@ local function DoSummonBossTick()
         Notify.new({Title="KILLED: "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
         SummonAutoSpawnFired[deadName]=nil
-        SummonBossTPDone=false LastSummonBossTP=0
-        SummonBossTarget=nil ClearTgt() HoverPos=nil
+        SummonBossTarget=nil ClearTgt()
+        if BSF[deadName] then FireSummonBoss(deadName) SummonBossCommitted[deadName]=true end
         return
     end
     CurTarget=model
