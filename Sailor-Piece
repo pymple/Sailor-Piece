@@ -64,6 +64,9 @@ local ConfLevel,LastLevelScanTick=0,0
 local ATween,ATweenConn,TweenOn=nil,nil,false
 local TweenTarget=nil
 local HumCache=setmetatable({},{__mode="k"})
+local CharHum=nil
+local CachedQuestAbandon=nil
+local LOOK_DOWN=Vector3.new(0,-1,0)
 local IslandTPd=false
 local SpawnDone=false
 local LockTarget=nil
@@ -158,13 +161,20 @@ local function IsPlayer(m) for _,p in ipairs(Players:GetPlayers()) do if p.Chara
 local function ShouldIgnore(n) local lo=n:lower() for _,ig in ipairs(IgnoreList) do if lo:find(ig,1,true) then return true end end if lo:match("boss$") then return true end return false end
 local function MatchEnemy(name,island) if not island then return false end local lo=name:lower() for _,e in ipairs(island.Enemies) do if lo:find(e:lower(),1,true) then return true end end return false end
 local function AbandonAllQuests()
-    local ab=nil pcall(function() ab=WalkPathWait(RS,3,unpack(QUEST_ABANDON_PATH)) end)
+    QState="NONE"
+    if not CachedQuestAbandon then
+        pcall(function()
+            local f=RS:FindFirstChild(QUEST_ABANDON_PATH[1])
+            if f then CachedQuestAbandon=f:FindFirstChild(QUEST_ABANDON_PATH[2]) end
+        end)
+        if not CachedQuestAbandon then pcall(function() CachedQuestAbandon=WalkPathWait(RS,1,unpack(QUEST_ABANDON_PATH)) end) end
+    end
+    local ab=CachedQuestAbandon
     if ab then
         pcall(function() ab:FireServer("repeatable") end)
         pcall(function() ab:FireServer() end)
         for _,isl in ipairs(Islands) do pcall(function() ab:FireServer(isl.QuestNPC) end) end
     end
-    QState="NONE"
 end
 local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
@@ -285,7 +295,7 @@ local function OpenAllChests()
 end
 local function BuyMerchantItems()
     if not F.AutoMerchant then return end
-    if tick()-LastMerchant<5 then return end
+    if tick()-LastMerchant<1800 then return end
     LastMerchant=tick()
     local remote
     pcall(function() remote=WalkPathWait(RS,2,unpack(MERCHANT_REMOTE_PATH)) end)
@@ -293,13 +303,13 @@ local function BuyMerchantItems()
     for _,item in ipairs(MerchantItems) do
         if FM[item] then
             for _=1,15 do
-                local ok,result=SafeInvoke(remote,3,item,1)
+                local ok,result=SafeInvoke(remote,0.75,item,1)
                 if not ok or result==false then break end
                 if type(result)=="table" and result.success==false then break end
                 if F.MerchNotify then
                     Notify.new({Title="Auto Merchant",Content="Purchased "..item,Duration=4,Icon=ICON})
                 end
-                task.wait(0.1)
+                task.wait(0.05)
             end
         end
     end
@@ -572,7 +582,9 @@ local function SetupAntiAFK()
     task.spawn(function() while Running do task.wait(Jit(240,30)) if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) pcall(function() keypress(0x41) task.wait(0.1) keyrelease(0x41) end) pcall(function() mousemoverel(1,0) task.wait(0.05) mousemoverel(-1,0) end) end end end)
 end
 local function OnCharAdded(char)
-    char:WaitForChild("Humanoid",10) LockTarget=nil TweenOn=false TweenTarget=nil HoverPos=nil
+    CharHum=nil
+    char:WaitForChild("Humanoid",10) CharHum=char:FindFirstChildOfClass("Humanoid")
+    LockTarget=nil TweenOn=false TweenTarget=nil HoverPos=nil
     if F.AutoEquip then task.spawn(function() task.wait(0.5) for _=1,10 do task.wait(0.3) local eq=GetTool() if eq and eq.Name:lower()~="combat" then break end EquipSword() end end) end
 end
 if LP.Character then task.spawn(function() OnCharAdded(LP.Character) end) end
@@ -583,7 +595,7 @@ Conn(RunService.RenderStepped:Connect(function()
     local c=LP.Character if not c then return end
     local hrp=c:FindFirstChild("HumanoidRootPart") if not hrp then return end
     if F.FarmMode=="Plank" then
-        local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=true end
+        if CharHum then CharHum.PlatformStand=true end
         if tick()-LastCanCollide>1 then LastCanCollide=tick() for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
     end
     if TweenOn then return end
@@ -599,12 +611,11 @@ Conn(RunService.RenderStepped:Connect(function()
             hrp.CFrame=CFrame.new(goal,look or goal) HoverPos=goal
         end
     elseif HoverPos then
-        hrp.CFrame=CFrame.new(HoverPos,HoverPos+Vector3.new(0,-1,0))
+        hrp.CFrame=CFrame.new(HoverPos,HoverPos+LOOK_DOWN)
     end
     if F.FarmMode=="Plank" then
-        hrp.Velocity=Vector3.zero
-        pcall(function() hrp.AssemblyLinearVelocity=Vector3.zero end)
-        pcall(function() hrp.AssemblyAngularVelocity=Vector3.zero end)
+        hrp.AssemblyLinearVelocity=Vector3.zero
+        hrp.AssemblyAngularVelocity=Vector3.zero
     end
 end))
 local function ExitBossMode(lastBossName)
@@ -624,16 +635,26 @@ end
 local function DoFarmTick()
     local tgtIsland=GetFarmIsland() if not tgtIsland then return end
     if not CurIsland or CurIsland.Portal~=tgtIsland.Portal then
-        StopTw() QuestAbandon() task.wait(0.15)
-        CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=0
+        -- Set all state atomically BEFORE any yields so concurrent FullReset() can't corrupt mid-switch state
+        StopTw()
+        CurIsland=tgtIsland IslandTPd=false SpawnDone=false QState="NONE" CurTarget=nil LockTarget=nil HoverPos=nil LastEnemy=0 LastQuestAccept=tick()
+        AbandonAllQuests()
         Notify.new({Title="Teleporting to "..PortalDisplayName(tgtIsland.Portal),Content="Lv."..GetLevel().." | "..tgtIsland.QuestNPC,Duration=3,Icon=ICON})
     end
     if not IslandTPd then
         if DoTP(CurIsland.Portal) then
-            IslandTPd=true task.wait(0.8)
-            for _=1,8 do if #FindEnemies(CurIsland)>0 then break end task.wait(0.2) end
+            IslandTPd=true
+            local snapIsland=CurIsland
+            task.wait(0.8)
+            for _=1,8 do
+                if CurIsland~=snapIsland then return end
+                if #FindEnemies(CurIsland)>0 then break end
+                task.wait(0.2)
+            end
+            if CurIsland~=snapIsland then return end
             LastEnemy=tick()
             if F.AutoSpawn and not SpawnDone then SpawnCrystal(CurIsland) SpawnDone=true task.wait(0.2) end
+            if CurIsland~=snapIsland then return end
             if F.AutoQuest and QState=="NONE" then task.wait(0.1) QuestAccept(CurIsland) end
         else task.wait(1) end
         return
@@ -810,7 +831,7 @@ task.spawn(function() task.wait(1.5) ScanAllBossTimers() while Running do ScanAl
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests one by one"})
 local MSec=FTab:DrawSection({Name="Auto Merchant",Position="right"})
-MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v end}).Link:AddHelper({Text="Buys selected items every 5s"})
+MSec:AddToggle({Name="Enable Auto Merchant",Flag="AutoMerchant",Default=false,Callback=function(v) F.AutoMerchant=v if v then LastMerchant=0 end end}).Link:AddHelper({Text="Buys all selected items in one go; 30 min restock"})
 MSec:AddToggle({Name="Merchant Notifier",Flag="MerchNotify",Default=true,Callback=function(v) F.MerchNotify=v end}).Link:AddHelper({Text="Shows notification when items are purchased"})
 for _,item in ipairs(MerchantItems) do MSec:AddToggle({Name=item,Flag="Merchant_"..item:gsub(" ","_"),Default=false,Callback=function(v) FM[item]=v end}) end
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
