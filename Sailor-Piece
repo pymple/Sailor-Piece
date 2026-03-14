@@ -74,11 +74,15 @@ local FM={}
 for _,item in ipairs(MerchantItems) do FM[item]=false end
 local Kills,BossKills=0,0
 local Hub,Notify,Win,CfgMgr,FarmToggle,BossToggle,SummonBossToggle
+local SkillToggles={}
+local SkillKeys={"SkillZ","SkillX","SkillC","SkillV","SkillB"}
+local AllSkillsToggle
 local Running=true
 local CurIsland,CurTarget=nil,nil
 local Conns={}
 local LastEquip,LastTP,LastEnemy,LastSkill,LastChest,LastQuestAccept,LastMerchant,LastCanCollide=0,0,0,0,0,0,0,0
 local TPCount,TPReset=0,tick()
+local KillCount=0
 local ConfLevel,LastLevelScanTick=0,0
 local ATween,ATweenConn,TweenOn=nil,nil,false
 local TweenTarget=nil
@@ -109,6 +113,11 @@ local SummonBossCommitted={}
 local SummonBossCurrentIsland=nil
 local SummonBossOrder=0
 local SummonBossFailCount={}
+local SummonBossLastFire={}
+local SummonBossLastKill={}
+local SummonBossStuckSince=0
+local SUMMON_GRACE=12
+local SUMMON_STUCK_TIMEOUT=30
 local function Conn(c) table.insert(Conns,c) return c end
 local function Typing() return UserInputService:GetFocusedTextBox()~=nil end
 local function Jit(b,v) return b+(math.random()*v*2-v) end
@@ -208,7 +217,7 @@ local function FullReset()
     ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false SpawnDone=false LastEnemy=0 LastTP=0 TPCount=0
     AbandonAllQuests()
     LastQuestAccept=0 BossTargetName=nil BossFight=false BossTPDone=false LastBossTP=0 BossCurrentIsland=nil
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} SummonBossLastFire={} SummonBossLastKill={} SummonBossStuckSince=0
     pcall(function() local c=LP.Character if c then local hm=c:FindFirstChildOfClass("Humanoid") if hm then hm.PlatformStand=false end end end)
 end
 local function DoTP(portal)
@@ -600,6 +609,16 @@ end
 local function ToggleFarm() if FarmToggle then pcall(function() FarmToggle:SetValue(not FarmToggle:GetValue()) end) else F.AutoFarmLevel=not F.AutoFarmLevel if not F.AutoFarmLevel then FullReset() end end end
 local function ToggleBoss() if BossToggle then pcall(function() BossToggle:SetValue(not BossToggle:GetValue()) end) else F.BossEnabled=not F.BossEnabled if not F.BossEnabled and BossFight then FullReset() end end end
 local function ToggleSummonBoss() if SummonBossToggle then pcall(function() SummonBossToggle:SetValue(not SummonBossToggle:GetValue()) end) else F.SummonBossEnabled=not F.SummonBossEnabled if not F.SummonBossEnabled then ExitSummonBossMode() end end end
+local function ToggleAllSkills()
+    local anyOn=false
+    for _,k in ipairs(SkillKeys) do if F[k] then anyOn=true break end end
+    local newVal=not anyOn
+    for _,k in ipairs(SkillKeys) do
+        local tgl=SkillToggles[k]
+        if tgl then pcall(function() tgl:SetValue(newVal) end) else F[k]=newVal end
+    end
+    if AllSkillsToggle then pcall(function() AllSkillsToggle:SetValue(newVal) end) end
+end
 local function SetupAntiAFK()
     pcall(function() for _,c in ipairs(getconnections(LP.Idled)) do c:Disable() end end)
     pcall(function() Conn(LP.Idled:Connect(function() if F.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) end end)) end)
@@ -710,7 +729,7 @@ local function DoFarmTick()
         LastEnemy=tick()
         if CurTarget then
             local hm=GetHum(CurTarget)
-            if not hm or hm.Health<=0 or not CurTarget.Parent then if hm and hm.Health<=0 then Kills=Kills+1 end CurTarget=nil LockTarget=nil
+            if not hm or hm.Health<=0 or not CurTarget.Parent then if hm and hm.Health<=0 then Kills=Kills+1 KillCount=KillCount+1 end CurTarget=nil LockTarget=nil
             elseif not MatchEnemy(CurTarget.Name,CurIsland) then CurTarget=nil LockTarget=nil
             else local cp=ModelPos(CurTarget) if cp and DistTo(cp)>400 then CurTarget=nil LockTarget=nil end end
         end
@@ -773,7 +792,7 @@ local function DoBossTick()
         local m3=CheckBoss(BossTargetName)
         if not m3 then
             local deadName=BossTargetName
-            BossKills=BossKills+1 Kills=Kills+1 RecordBossDeath(deadName)
+            BossKills=BossKills+1 Kills=Kills+1 KillCount=KillCount+1 RecordBossDeath(deadName)
             Notify.new({Title="Killed "..GetBossDisplay(deadName),Content="Successfully killed "..GetBossDisplay(deadName),Duration=4,Icon=ICON})
             BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil task.wait(0.15)
             local nextName=PickNextBossName()
@@ -789,7 +808,7 @@ local function DoBossTick()
     if model and IsAnosModel(BossTargetName) and model.Name~=BossTargetName then BossTargetName=model.Name end
     if not model then
         local deadName=BossTargetName
-        BossKills=BossKills+1 Kills=Kills+1 RecordBossDeath(deadName)
+        BossKills=BossKills+1 Kills=Kills+1 KillCount=KillCount+1 RecordBossDeath(deadName)
         Notify.new({Title="Killed "..GetBossDisplay(deadName),Content="Successfully killed "..GetBossDisplay(deadName),Duration=4,Icon=ICON})
         BossTargetName=nil BossTPDone=false ClearTgt() HoverPos=nil task.wait(0.15)
         local nextName=PickNextBossName()
@@ -817,6 +836,7 @@ local function GetSummonBossDiff(name)
 end
 local function FireSummonBoss(name)
     if not BSF[name] then return end
+    SummonBossLastFire[name]=tick()
     pcall(function()
         if name=="AnosBoss" then
             local r=WalkPathWait(RS,2,unpack(R.AnosBoss))
@@ -852,7 +872,7 @@ local function HasAnySummonBossEnabled()
     return false
 end
 local function ExitSummonBossMode()
-    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={}
+    SummonBossFight=false SummonBossTarget=nil SummonBossTPDone=false LastSummonBossTP=0 SummonBossCommitted={} SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} SummonBossLastFire={} SummonBossLastKill={} SummonBossStuckSince=0
     ClearTgt() HoverPos=nil
 end
 local function SummonBossPosValid(model)
@@ -986,19 +1006,31 @@ local function DoSummonBossTick()
     if not SummonBossTarget then
         SummonBossTarget=PickBestTarget()
         if not SummonBossTarget then
-            -- Clear committed for current-island bosses not alive; track per-boss fail counts
+            -- Track stuck time — if no target found for too long, exit summon mode
+            if SummonBossStuckSince==0 then SummonBossStuckSince=tick() end
+            if tick()-SummonBossStuckSince>SUMMON_STUCK_TIMEOUT then
+                Notify.new({Title="Summon Boss",Content="No targets for "..SUMMON_STUCK_TIMEOUT.."s — returning to farm",Duration=4,Icon=ICON})
+                ExitSummonBossMode()
+                return
+            end
+            -- Clear committed for current-island bosses not alive; only count fail if grace period elapsed
             for _,b in ipairs(SummonBosses) do
                 if SummonBossCommitted[b.Name] and GetSummonBossIsland(b.Name)==SummonBossCurrentIsland and not CheckSummonBoss(b.Name) then
-                    SummonBossCommitted[b.Name]=nil
-                    SummonBossFailCount[b.Name]=(SummonBossFailCount[b.Name] or 0)+1
-                    if SummonBossFailCount[b.Name]>=3 then
-                        BSF[b.Name]=false
-                        local tgl=BSFToggle[b.Name]
-                        if tgl then
-                            pcall(function() tgl:SetValue(false) end)
+                    local lastFire=SummonBossLastFire[b.Name] or 0
+                    local lastKill=SummonBossLastKill[b.Name] or 0
+                    local elapsed=tick()-math.max(lastFire,lastKill)
+                    if elapsed>=SUMMON_GRACE then
+                        SummonBossCommitted[b.Name]=nil
+                        SummonBossFailCount[b.Name]=(SummonBossFailCount[b.Name] or 0)+1
+                        if SummonBossFailCount[b.Name]>=3 then
+                            BSF[b.Name]=false
+                            local tgl=BSFToggle[b.Name]
+                            if tgl then
+                                pcall(function() tgl:SetValue(false) end)
+                            end
+                            local dsp=SummonBossDisplay[b.Name] or b.Name
+                            Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=ICON})
                         end
-                        local dsp=SummonBossDisplay[b.Name] or b.Name
-                        Notify.new({Title="Summon Failed",Content=dsp.." disabled — no materials?",Duration=5,Icon=ICON})
                     end
                 end
             end
@@ -1006,9 +1038,21 @@ local function DoSummonBossTick()
             if not HasAnySummonBossEnabled() then
                 task.wait(0.3) return
             end
-            SummonAllEnabled()
+            -- Only re-summon bosses that aren't in cooldown grace period
+            for _,b in ipairs(SummonBosses) do
+                if BSF[b.Name] and not SummonBossCommitted[b.Name] and GetSummonBossIsland(b.Name)==SummonBossCurrentIsland then
+                    local lastKill=SummonBossLastKill[b.Name] or 0
+                    if tick()-lastKill>=SUMMON_GRACE then
+                        FireSummonBoss(b.Name)
+                        SummonBossOrder=SummonBossOrder+1
+                        SummonBossCommitted[b.Name]=SummonBossOrder
+                        task.wait(0.1)
+                    end
+                end
+            end
             local nextName,_=AcquireSummonBossFast(nil,1.0)
             SummonBossTarget=nextName
+            if SummonBossTarget then SummonBossStuckSince=0 end
             if not SummonBossTarget then
                 -- Check if there are bosses on other islands
                 for _,b in ipairs(SummonBosses) do
@@ -1018,10 +1062,11 @@ local function DoSummonBossTick()
                         return
                     end
                 end
-                task.wait(0.3)
+                task.wait(0.5)
             end
             return
         end
+        SummonBossStuckSince=0
         Notify.new({Title="Summon Boss: "..(SummonBossDisplay[SummonBossTarget] or SummonBossTarget),Content="Attacking!",Duration=2,Icon=ICON})
     end
     -- Phase 3: check if target needs island switch
@@ -1039,10 +1084,12 @@ local function DoSummonBossTick()
         if model then CurTarget=model return end
         local deadName=SummonBossTarget
         local deadDisplay=SummonBossDisplay[deadName] or deadName
-        BossKills=BossKills+1 Kills=Kills+1
+        BossKills=BossKills+1 Kills=Kills+1 KillCount=KillCount+1
         Notify.new({Title="Killed "..deadDisplay,Content="Successfully killed "..deadDisplay,Duration=4,Icon=ICON})
         SummonBossCommitted[deadName]=nil
+        SummonBossLastKill[deadName]=tick()
         SummonBossTarget=nil ClearTgt()
+        SummonBossStuckSince=0
         -- Re-summon the killed boss if still enabled
         if BSF[deadName] and GetSummonBossIsland(deadName)==SummonBossCurrentIsland then
             task.wait(0.3)
@@ -1085,12 +1132,14 @@ Hub.Colors.Toggle=Color3.fromRGB(220,60,60)
 Hub:Loader(ICON,2).yield()
 Win=Hub.new({Name="PIMPLE v7.5",Keybind="LeftAlt",Logo=ICON,TextSize=18,Font=Enum.Font.GothamBold})
 Win.OnToggle=function() end
-Notify.new({Title="pimpleHUB v7.5",Content="Left Alt = UI | V = Farm | B = Boss | N = Summon",Duration=5,Icon=ICON})
+Notify.new({Title="pimpleHUB v7.5",Content="Left Alt = UI | V = Farm | B = Boss | N = Summon | M = Skills",Duration=5,Icon=ICON})
+do
 local WM=Win:Watermark()
 WM:AddText({Icon="user",Text=LP.DisplayName})
 WM:AddText({Icon="clock",Text=Hub:GetDate()})
 local LT=WM:AddText({Icon="timer",Text="TIME"})
-task.spawn(function() while Running do task.wait(1) pcall(function() LT:SetText(Hub:GetTimeNow()) end) end end)
+local KT=WM:AddText({Icon="zap",Text="Kills: 0"})
+task.spawn(function() while Running do task.wait(1) pcall(function() LT:SetText(Hub:GetTimeNow()) end) pcall(function() KT:SetText("Kills: "..KillCount) end) end end)
 WM:AddText({Icon="server",Text=Hub.Version})
 Win:DrawCategory({Name="AUTO FARM"})
 local FTab=Win:DrawTab({Name="Farm",Icon="sword",EnableScrolling=true})
@@ -1150,11 +1199,19 @@ for _,bDef in ipairs(SummonBosses) do
     end
 end
 local SSec=FTab:DrawSection({Name="Auto Skills",Position="right"})
-SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}).Link:AddHelper({Text="Auto use"})
-SSec:AddToggle({Name="Skill X",Flag="SkillX",Default=false,Callback=function(v) F.SkillX=v end}).Link:AddHelper({Text="Auto use"})
-SSec:AddToggle({Name="Skill C",Flag="SkillC",Default=false,Callback=function(v) F.SkillC=v end}).Link:AddHelper({Text="Auto use"})
-SSec:AddToggle({Name="Skill V",Flag="SkillV",Default=false,Callback=function(v) F.SkillV=v end}).Link:AddHelper({Text="Auto use"})
-SSec:AddToggle({Name="Skill B",Flag="SkillB",Default=false,Callback=function(v) F.SkillB=v end}).Link:AddHelper({Text="Auto use"})
+AllSkillsToggle=SSec:AddToggle({Name="All Skills",Flag="AllSkills",Default=false,Callback=function(v)
+    for _,k in ipairs(SkillKeys) do
+        local tgl=SkillToggles[k]
+        if tgl then pcall(function() tgl:SetValue(v) end) else F[k]=v end
+    end
+end})
+AllSkillsToggle.Link:AddKeybind({Default="M",Flag="AllSkillsKeybind",Callback=ToggleAllSkills})
+AllSkillsToggle.Link:AddHelper({Text="Toggle all skills on/off"})
+SkillToggles.SkillZ=SSec:AddToggle({Name="Skill Z",Flag="SkillZ",Default=false,Callback=function(v) F.SkillZ=v end}) SkillToggles.SkillZ.Link:AddHelper({Text="Auto use"})
+SkillToggles.SkillX=SSec:AddToggle({Name="Skill X",Flag="SkillX",Default=false,Callback=function(v) F.SkillX=v end}) SkillToggles.SkillX.Link:AddHelper({Text="Auto use"})
+SkillToggles.SkillC=SSec:AddToggle({Name="Skill C",Flag="SkillC",Default=false,Callback=function(v) F.SkillC=v end}) SkillToggles.SkillC.Link:AddHelper({Text="Auto use"})
+SkillToggles.SkillV=SSec:AddToggle({Name="Skill V",Flag="SkillV",Default=false,Callback=function(v) F.SkillV=v end}) SkillToggles.SkillV.Link:AddHelper({Text="Auto use"})
+SkillToggles.SkillB=SSec:AddToggle({Name="Skill B",Flag="SkillB",Default=false,Callback=function(v) F.SkillB=v end}) SkillToggles.SkillB.Link:AddHelper({Text="Auto use"})
 SSec:AddSlider({Name="Skill Cooldown",Min=0.3,Max=5,Default=1.0,Round=1,Flag="SkillCooldown",Callback=function(v) F.SkillCooldown=v end})
 local CSec=FTab:DrawSection({Name="Auto Chest",Position="right"})
 CSec:AddToggle({Name="Auto Open Chests",Flag="AutoChest",Default=false,Callback=function(v) F.AutoChest=v end}).Link:AddHelper({Text="Opens all chests in batch"})
@@ -1181,7 +1238,7 @@ UISec:AddButton({Name="Destroy GUI",Callback=function()
     task.delay(0.15,function() pcall(function() Win:Destroy() end) end)
 end})
 local InfoSec=SetTab:DrawSection({Name="Info",Position="right"})
-InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Toggle Farm\nFarm Style: Plank (above) or Behind (offset)\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nAnos: separate summon remote, detects any difficulty\nChest: batch open all at once"})
+InfoSec:AddParagraph({Title="pimpleHUB v7.5",Content="Left Alt = Toggle UI | V = Farm | B = Boss\nN = Summon | M = All Skills\nFarm Style: Plank (above) or Behind (offset)\nMove Mode: Tween (smooth) or Teleport (instant)\nBoss: Portal TP first, cached positions\nAnos: separate summon remote, detects any difficulty\nChest: batch open all at once"})
 local ThSec=ThTab:DrawSection({Name="UI Themes",Position="left"})
 ThSec:AddDropdown({Name="Select Theme",Default="Default",Values={"Default","Dark Green","Dark Blue","Purple Rose","Skeet"},Callback=function(v) Hub:SetTheme(v) end})
 local CfgUI=Win:DrawConfig({Name="Config",Icon="folder",Config=CfgMgr})
@@ -1202,7 +1259,7 @@ task.defer(function()
         end
     end)
 end)
-Conn(UserInputService.InputBegan:Connect(function(input,gp) if gp or Typing() then return end if input.KeyCode==Enum.KeyCode.V then ToggleFarm() elseif input.KeyCode==Enum.KeyCode.B then ToggleBoss() elseif input.KeyCode==Enum.KeyCode.N then ToggleSummonBoss() end end))
+end
 SetupAntiAFK()
 task.spawn(DisableGameAutoSkills)
 task.spawn(function() while Running do if F.AutoQuest then QuestCompletionScan() end task.wait(2) end end)
@@ -1221,7 +1278,7 @@ task.spawn(function()
             if not IsAlive() then task.wait(0.3) break end
             if not isSummonActive and SummonBossFight then ExitSummonBossMode() end
             if isSummonActive and not SummonBossFight then
-                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
+                SummonBossFight=true BossFight=false BossTargetName=nil BossTPDone=false SummonBossTPDone=false LastSummonBossTP=0 SummonBossCurrentIsland=nil SummonBossOrder=0 SummonBossFailCount={} SummonBossLastFire={} SummonBossLastKill={} SummonBossStuckSince=0 ClearTgt() HoverPos=nil CurIsland=nil IslandTPd=false
                 Notify.new({Title="Summon Boss Mode",Content="Starting summon boss cycle",Duration=3,Icon=ICON})
             end
             if SummonBossFight then DoSummonBossTick() task.wait(0.1) break end
