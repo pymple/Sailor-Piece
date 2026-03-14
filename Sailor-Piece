@@ -884,6 +884,8 @@ local function DoSummonBossTick()
         if BSF[deadName] then FireSummonBoss(deadName) SummonBossCommitted[deadName]=true end
         return
     end
+    local bossPos=ModelPos(model)
+    if not bossPos or bossPos.Y < -100 then task.wait(0.2) return end
     CurTarget=model
     TweenTo(model)
     Attack(model)
